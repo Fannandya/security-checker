@@ -53,7 +53,7 @@ OSC requires **Python 3.8+** and `pip`.
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/iyanji/osc.git
+git clone https://github.com/Fannandya/security-checker.git
 cd osc
 
 # 2. Create and activate a virtual environment (Recommended)
