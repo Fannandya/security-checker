@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Command-line interface for OSC - Open Source Code Scanner."""
+
+import sys
+import os
+import argparse
+
+from colorama import Fore, Style
+
+from osc.scanner import EnhancedOSCScanner
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description='OSC - Open Source Code Scanner', add_help=False)
+    parser.add_argument('target', nargs='?', help='Target URL to scan')
+    parser.add_argument('-s', '--session', help='Session cookie for authenticated scanning')
+    parser.add_argument('-t', '--threads', type=int, default=10, help='Number of threads (default: 10)')
+    parser.add_argument('--timeout', type=int, default=10, help='Request timeout in seconds (default: 10)')
+    parser.add_argument('-d', '--depth', type=int, default=1,
+                        help='Crawl depth for in-scope links (0 = seeds only, default: 1)')
+    parser.add_argument('--max-urls', type=int, default=500, dest='max_urls',
+                        help='Maximum URLs to scan (default: 500)')
+    parser.add_argument('--delay', type=float, default=0.0,
+                        help='Delay in seconds between requests per worker (default: 0)')
+    parser.add_argument('--retries', type=int, default=2,
+                        help='HTTP retries on transient errors (default: 2)')
+    parser.add_argument('--user-agent', dest='user_agent', help='Custom User-Agent string')
+    parser.add_argument('--verify', action='store_true',
+                        help='Enable TLS certificate verification (default: disabled)')
+    parser.add_argument('-A', '--aggressive', action='store_true',
+                        help='Enable wordlist content discovery (path brute-force)')
+    parser.add_argument('--wordlist', help='Custom wordlist file for aggressive mode (default: bundled)')
+    parser.add_argument('--extensions', help='Comma-separated extensions to try (e.g. php,bak,sql)')
+    parser.add_argument('-o', '--output', help='Write JSON report to FILE')
+    parser.add_argument('--html', help='Write HTML report to FILE')
+    parser.add_argument('--csv', help='Write CSV report to FILE')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output (errors + progress)')
+    parser.add_argument('-h', '--help', action='store_true', help='Show help message')
+    return parser
+
+
+def _prepare_output_path(filename):
+    if not filename:
+        return None
+    # Jika user sudah memberi path spesifik (misal /tmp/hasil.json), gunakan itu
+    if os.path.dirname(filename):
+        return filename
+    # Jika hanya nama file (misal hasil.json), buat dan masukkan ke folder output/
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    return os.path.join(output_dir, filename)
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.help or not args.target:
+        EnhancedOSCScanner('http://example.com').print_help()
+        sys.exit(0)
+
+    target = args.target
+    if not target.startswith(('http://', 'https://')):
+        target = 'https://' + target
+
+    extensions = None
+    if args.extensions:
+        extensions = [e.strip() for e in args.extensions.split(',') if e.strip()]
+
+    try:
+        scanner = EnhancedOSCScanner(
+            target=target,
+            session_cookie=args.session,
+            max_threads=args.threads,
+            timeout=args.timeout,
+            depth=args.depth,
+            max_urls=args.max_urls,
+            delay=args.delay,
+            retries=args.retries,
+            user_agent=args.user_agent,
+            verify=args.verify,
+            verbose=args.verbose,
+            aggressive=args.aggressive,
+            wordlist=args.wordlist,
+            extensions=extensions,
+        )
+        scanner.run_scan(
+            output_file=_prepare_output_path(args.output),
+            html_file=_prepare_output_path(args.html),
+            csv_file=_prepare_output_path(args.csv)
+        )
+    except KeyboardInterrupt:
+        print(f"\n{Fore.RED}[!] Scan interrupted by user{Style.RESET_ALL}")
+        sys.exit(1)
+    except Exception as exc:
+        print(f"{Fore.RED}[!] Error: {str(exc)}{Style.RESET_ALL}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

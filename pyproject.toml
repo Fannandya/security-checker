@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "osc"
+version = "2.1.0"
+description = "Open Source Code Scanner - Tool to find exposed sensitive data on web applications."
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "mamay"}
+]
+dependencies = [
+    "requests>=2.31.0",
+    "colorama>=0.4.6",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "brotli>=1.1.0"
+]
+
+[project.scripts]
+osc = "osc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["osc*"]
