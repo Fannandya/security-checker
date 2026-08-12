@@ -21,7 +21,7 @@ OSC is a Python-based security tool for testing the security posture of websites
 - **Endpoint Discovery + Recon (always on):** Wordlist-based path/endpoint brute-force (soft-404 aware, to avoid alert fatigue on catch-all servers) combined with subdomain enumeration (certificate-transparency lookup via crt.sh, plus wildcard-DNS-aware DNS brute-force), a lightweight common-port scan, technology fingerprinting (server/framework/CMS + version), and WAF/CDN detection — every discovered subdomain/endpoint gets the same security posture audit as the original target.
 - **Active Vulnerability Probing (`-X`, opt-in):** Reflected XSS, error-based SQL injection, path traversal/LFI, baseline-aware Server-Side Template Injection (SSTI), and an SSRF-candidate-parameter heuristic — tested against query parameters on already-crawled, in-scope URLs only. The one part of OSC that sends real test payloads instead of just observing, so it stays opt-in.
 - **False Positive Filtering:** Utilizes soft-404 baseline detection, pre-flag content verification, entropy checks, placeholder filtering, automated deduplication, wildcard-DNS detection (subdomain brute-force), and baseline comparison for SSTI detection.
-- **Risk Assessment:** Assigns confidence levels (`high`, `medium`, `low`) per finding and provides a comprehensive risk summary.
+- **Risk Assessment:** Assigns confidence levels (`high`, `medium`, `low`) per finding, maps each category to a standard CWE ID and concrete remediation advice (for QA/defect-tracker workflows), and provides a comprehensive risk summary.
 - **Intelligent Crawling:** Uses BeautifulSoup for scope-controlled link discovery, respecting depth limits and URL caps.
 - **Multi-format Reporting:** Exports findings to JSON, HTML, and CSV. Outputs are cleanly managed within an isolated `output/` directory.
 - **Configurable Engine:** Supports multi-threading, request delays, custom user agents, flexible session cookies, and robust retry mechanisms.
@@ -132,7 +132,7 @@ python -m osc  [OPTIONS] TARGET_URL      # Via package (all platforms)
 | `--subdomain-wordlist FILE` | Custom wordlist for DNS subdomain brute-force (default: bundled; requires `dnspython`) |
 | `-X, --active` | Enable active vulnerability probing (XSS/SQLi/traversal/SSTI/SSRF-candidate) — the only opt-in mode |
 | `--active-checks LIST` | Comma-separated active checks to run (default: all; `xss,sqli,traversal,ssti,ssrf`) |
-| `-o, --output FILE` | Write JSON report to the specified filename |
+| `-o, --output FILE` | Write report to FILE. Format is auto-detected from the extension: `.csv` → CSV, `.html` → HTML, anything else → JSON |
 | `--html FILE` | Write HTML report to the specified filename |
 | `--csv FILE` | Write CSV report to the specified filename |
 | `-v, --verbose` | Enable verbose logging (errors and progress) |
@@ -176,7 +176,7 @@ Recon goes beyond the crawled pages themselves and runs automatically on every s
 | Category | Check | Risk |
 |---|---|---|
 | `subdomain_found` | Subdomains discovered via certificate-transparency logs (crt.sh) and, if `dnspython` is installed, DNS brute-force against `osc/wordlists/subdomains.txt` (override with `--subdomain-wordlist`). Brute-force automatically detects and skips wildcard-DNS domains (where every name resolves) to avoid a flood of false positives. | Low |
-| `open_port` | Common TCP ports (21, 22, 23, 25, 53, 80, 110, 143, 443, 3306, 3389, 5432, 6379, 8080, 8443) found open on the target host | Medium (DB/RDP/Redis/Telnet ports) / Low (others) |
+| `open_port` | A curated ~35-port list (web, mail, remote-admin, and — notably — data-store/container ports: MongoDB 27017, Elasticsearch 9200/9300, Redis 6379, Memcached 11211, CouchDB 5984, Docker API 2375, MSSQL/Oracle/MySQL/PostgreSQL, SMB/NFS/RPCbind) found open on the target host. Each open port gets a best-effort, read-only banner grab (an HTTP HEAD for web-like ports, or just reading the greeting a service like SSH/FTP/SMTP/MySQL sends unprompted on connect — no credentials or protocol commands are ever sent) and a CVE-search link when a banner is captured. Override the list with `--ports 21,22,80,443,...`. | Medium (data-store/remote-admin/container ports) / Low (others) |
 | `tech_fingerprint` | Server/framework/CMS detection from headers, cookies, and HTML (WordPress, Drupal, Joomla, Laravel, Django, Express, Next.js, nginx/Apache/IIS versions, etc.), with a CVE-search link for the detected version | Low |
 | `waf_detected` | WAF/CDN fingerprint (Cloudflare, Akamai, Sucuri, Imperva Incapsula, AWS WAF, F5 BIG-IP ASM) — informational, helps set expectations for `-X` | Low |
 
@@ -200,9 +200,13 @@ Only error-based SQLi is used (no time-based/blind payloads) and every check is 
 
 ### Output Formats
 
-- **JSON (`-o`)**: Comprehensive scan data including `scan_info`, `summary` (category counts and risk assessment), and detailed `findings`.
-- **HTML (`--html`)**: A standalone, interactive report featuring risk badges, category summaries, and finding tables.
-- **CSV (`--csv`)**: A flat data structure (`category, confidence, risk, url, value, …`) optimized for spreadsheet analysis.
+- **JSON (`-o`)**: Comprehensive scan data including `scan_info` (with `reproducibility` — the CLI command with any `-s`/`--session` value redacted, Python version, `--verify`/`-X` state — and `scope_and_limitations`, a plain-language list of what the scan did *not* test), `summary` (category counts, risk assessment, and a separate count of `informational_findings` vs `actionable_findings`), and detailed `findings`. Every finding carries an `evidence` field (the raw response headers / matched string) so results can be re-verified, a `cwe_id` (standard CWE identifier per category, for defect-tracking/compliance workflows) and `remediation` (concrete fix guidance for that finding), and an `informational` flag separating expected-but-informational observations (e.g. open ports 80/443, server banners, WAF/CDN, discovered subdomains) from actionable findings.
+- **HTML (`--html`)**: A standalone, interactive report featuring risk badges, category summaries, a Reproducibility table, a Scope & Limitations section, and finding tables with CWE ID, evidence, and remediation.
+- **CSV (`--csv`)**: A flat structure (`cwe_id, category, confidence, risk, url, value, content_type, status_code, pattern, context, evidence, informational, remediation`) optimized for spreadsheet analysis and QA defect-tracker import.
+
+> **Risk assessment note:** the overall risk verdict is weighted by category severity × confidence × (dampened) volume. `CRITICAL` additionally requires a *confirmed* severe finding (a HIGH-risk category reported at medium-or-higher confidence — e.g. reflected XSS, SQL injection, path traversal, SSTI, TLS failure, CORS-with-credentials) **and** a high weighted score (≈ ≥8; in practice several confirmed high-severity classes). A single confirmed XSS alone reports `HIGH`, not `CRITICAL`. A large volume of low-severity hygiene findings (missing SRI, exposed emails, file references) will not by itself produce a `CRITICAL` verdict. Informational findings never move the risk needle.
+
+> **Soft-404 content filtering:** secret/content-pattern scanning (emails, mixed content, missing SRI, sensitive-file references, API keys, etc.) is suppressed for URLs whose response matches the target's catch-all / soft-404 template. This prevents a single-page app that returns the same HTML for every path from producing hundreds of duplicate, misleading findings on paths that never existed. Link extraction is deliberately **not** suppressed by this filter — a soft-404 match can still be a real, in-scope page (e.g. a client-rendered SPA route served from the same shell), so crawling still continues from it.
 
 ---
 

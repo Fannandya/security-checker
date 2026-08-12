@@ -18,7 +18,25 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 ALL_CHECKS = ('xss', 'sqli', 'traversal', 'ssti', 'ssrf')
 
 
-def _finding(url, category, value, confidence, context=''):
+_REMEDIATION = {
+    'xss_reflected': 'Encode/escape all user-controlled output in its HTML context (use a '
+                      'context-aware auto-escaping template engine, not manual string building); '
+                      'apply a Content-Security-Policy as defense-in-depth.',
+    'sqli_error': 'Use parameterized queries / prepared statements - never build SQL by '
+                  'concatenating user input; run the DB user with least-privilege access and '
+                  'suppress verbose DB error output in production.',
+    'path_traversal': 'Validate the requested file against an allowlist of expected paths, '
+                       'reject "../" traversal sequences, and never pass user input directly to '
+                       'filesystem APIs; serve files from a dedicated, sandboxed directory.',
+    'ssti': 'Never render user-controlled input as template source; pass it only as template '
+            'variable data, and use a sandboxed/logic-less templating mode.',
+    'ssrf_candidate': 'Validate/allowlist destination hosts before making server-side requests '
+                       'with this parameter; block requests to internal/private IP ranges.',
+}
+
+
+def _finding(url, category, value, confidence, context='', evidence='',
+             status_code=None, informational=False):
     return {
         'url': url,
         'category': category,
@@ -26,6 +44,10 @@ def _finding(url, category, value, confidence, context=''):
         'confidence': confidence,
         'pattern': 'active_scan',
         'content_type': '',
+        'status_code': status_code,
+        'evidence': evidence,
+        'informational': informational,
+        'remediation': _REMEDIATION.get(category, ''),
         'context': context,
     }
 
@@ -66,6 +88,7 @@ def _check_xss(session, parts, pairs, index, timeout, verify):
             test_url, 'xss_reflected',
             f"Reflected XSS: parameter '{key}' echoes an unescaped HTML payload",
             'high', f"Injected: {payload}",
+            evidence=f"Injected: {payload}", status_code=resp.status_code,
         )
     return None
 
@@ -86,8 +109,18 @@ _SQL_ERROR_SIGNATURES = [
 ]
 
 
+def _matched_sql_signature(text):
+    if not text:
+        return None
+    for pattern in _SQL_ERROR_SIGNATURES:
+        match = pattern.search(text)
+        if match:
+            return match.group(0)
+    return None
+
+
 def _looks_like_sql_error(text):
-    return bool(text) and any(pattern.search(text) for pattern in _SQL_ERROR_SIGNATURES)
+    return _matched_sql_signature(text) is not None
 
 
 def _check_sqli(session, parts, pairs, index, timeout, verify, baseline_text):
@@ -98,12 +131,15 @@ def _check_sqli(session, parts, pairs, index, timeout, verify, baseline_text):
         resp = session.get(test_url, timeout=timeout, verify=verify)
     except Exception:
         return None
-    if _looks_like_sql_error(resp.text) and not _looks_like_sql_error(baseline_text):
+    matched = _matched_sql_signature(resp.text)
+    if matched and not _looks_like_sql_error(baseline_text):
         return _finding(
             test_url, 'sqli_error',
             f"Possible SQL injection: parameter '{key}' triggers a DB error signature "
             f"when a single quote is appended",
             'high', "Injected payload appended: '",
+            evidence=f"Injected payload: {payload!r}\nMatched DB error signature: {matched!r}",
+            status_code=resp.status_code,
         )
     return None
 
@@ -130,6 +166,7 @@ def _check_traversal(session, parts, pairs, index, timeout, verify):
             test_url, 'path_traversal',
             f"Path traversal / LFI: parameter '{key}' returns /etc/passwd contents",
             'high', f"Injected: {_TRAVERSAL_PAYLOAD}",
+            evidence=f"Injected: {_TRAVERSAL_PAYLOAD}", status_code=resp.status_code,
         )
     return None
 
@@ -140,18 +177,32 @@ def _check_traversal(session, parts, pairs, index, timeout, verify):
 _SSTI_TEMPLATES = ('{{%d*%d}}', '${%d*%d}', '#{%d*%d}')
 
 
+_SSTI_BASELINE_RETRIES = 10
+
+
 def _check_ssti(session, parts, pairs, index, timeout, verify, baseline_text=''):
     key, original = pairs[index]
-    a, b = random.randint(13, 19), random.randint(13, 19)
-    product = str(a * b)
-    product_re = re.compile(r'(?<!\d)' + re.escape(product) + r'(?!\d)')
     original = original or ''
+    baseline_text = baseline_text or ''
+
     # Guard against the product number showing up on the page for reasons that
     # have nothing to do with template evaluation (a price, a pixel width, a
     # year fragment, ...). A number this small (169-361) collides with ordinary
     # page content often enough that a bare substring check is not trustworthy.
-    if product_re.search(baseline_text or ''):
+    # Rather than giving up on the whole parameter the first time the randomly
+    # sampled product collides, resample fresh operands a few times - only skip
+    # if every sample happens to collide, which is astronomically unlikely.
+    a = b = product = product_re = None
+    for _attempt in range(_SSTI_BASELINE_RETRIES):
+        candidate_a, candidate_b = random.randint(13, 19), random.randint(13, 19)
+        candidate_product = str(candidate_a * candidate_b)
+        candidate_re = re.compile(r'(?<!\d)' + re.escape(candidate_product) + r'(?!\d)')
+        if not candidate_re.search(baseline_text):
+            a, b, product, product_re = candidate_a, candidate_b, candidate_product, candidate_re
+            break
+    if product is None:
         return None
+
     for template in _SSTI_TEMPLATES:
         payload = template % (a, b)
         test_url = _build_url(parts, pairs, index, payload)
@@ -167,6 +218,7 @@ def _check_ssti(session, parts, pairs, index, timeout, verify, baseline_text='')
                 f"Possible Server-Side Template Injection: parameter '{key}' evaluates "
                 f"'{payload}' to {product}",
                 'high', f"Injected: {payload}",
+                evidence=f"Injected: {payload}\nEvaluated to: {product}", status_code=resp.status_code,
             )
     return None
 
@@ -190,6 +242,7 @@ def _check_ssrf_candidate(url, pairs, index):
             'low',
             'Heuristic only, not exploited here (confirming SSRF needs an out-of-band '
             'listener). Manually test by pointing this parameter at a host you control.',
+            evidence=f"Parameter name: {key}", informational=True,
         )
     return None
 

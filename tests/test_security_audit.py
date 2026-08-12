@@ -48,6 +48,25 @@ def test_audit_security_headers_flags_server_banner():
                for f in findings)
 
 
+def test_audit_security_headers_captures_evidence_and_status():
+    headers = {'Server': 'nginx/1.18.0', 'X-Powered-By': 'Express'}
+    findings = security_audit.audit_security_headers('https://example.test/', headers, status_code=200)
+    # Every actionable security_headers finding carries the raw present headers + status.
+    security_findings = [f for f in findings if f['category'] == 'security_headers']
+    assert security_findings
+    for f in security_findings:
+        assert f['status_code'] == 200
+        assert 'server: nginx/1.18.0' in f['evidence'].lower()
+        assert 'x-powered-by: express' in f['evidence'].lower()
+
+
+def test_audit_security_headers_flags_banner_as_informational():
+    headers = {'Server': 'nginx/1.18.0'}
+    findings = security_audit.audit_security_headers('https://example.test/', headers)
+    banner = [f for f in findings if f['category'] == 'tech_fingerprint'][0]
+    assert banner['informational'] is True
+
+
 # ---------------------------------------------------------------------- #
 # audit_cookies
 # ---------------------------------------------------------------------- #
@@ -65,6 +84,24 @@ def test_audit_cookies_flags_missing_flags():
     assert 'Secure' in findings[0]['value']
     assert 'HttpOnly' in findings[0]['value']
     assert 'SameSite' in findings[0]['value']
+
+
+@responses.activate
+def test_audit_cookies_redacts_cookie_value_in_evidence():
+    # Regression: evidence used to be the raw Set-Cookie header, which
+    # includes the live cookie VALUE (often a real session/auth token) -
+    # writing that into a JSON/HTML/CSV report leaks a live credential.
+    responses.add(
+        responses.GET, 'https://example.test/',
+        body='ok', status=200,
+        headers=[('Set-Cookie', 'sessionid=super-secret-session-abc123; Path=/')],
+    )
+    resp = requests.get('https://example.test/')
+    findings = security_audit.audit_cookies('https://example.test/', resp)
+    assert len(findings) == 1
+    assert 'super-secret-session-abc123' not in findings[0]['evidence']
+    assert 'sessionid=<REDACTED>' in findings[0]['evidence']
+    assert 'Path=/' in findings[0]['evidence']
 
 
 @responses.activate

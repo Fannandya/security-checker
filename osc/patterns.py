@@ -133,3 +133,83 @@ RISK_LEVELS = {
     'ssti': 'HIGH',
     'ssrf_candidate': 'LOW',
 }
+
+# Standard CWE ID mapping per category for QA & defect tracking compliance
+CWE_MAPPINGS = {
+    'api_keys': 'CWE-798',
+    'passwords': 'CWE-798',
+    'database': 'CWE-312',
+    'financial': 'CWE-798',
+    'tokens': 'CWE-798',
+    'private_keys': 'CWE-321',
+    'exposed_sensitive_file': 'CWE-538',
+    'config_files': 'CWE-538',
+    'internal_ips': 'CWE-200',
+    'sensitive_file_reference': 'CWE-538',
+    'emails': 'CWE-200',
+    'tls_issues': 'CWE-326',
+    'cors_misconfiguration': 'CWE-942',
+    'directory_listing': 'CWE-548',
+    'security_headers': 'CWE-693',
+    'cookie_security': 'CWE-614',
+    'http_methods': 'CWE-749',
+    'open_redirect': 'CWE-601',
+    'tech_fingerprint': 'CWE-200',
+    'mixed_content': 'CWE-311',
+    'sri_missing': 'CWE-353',
+    'security_txt_missing': 'CWE-1008',
+    'graphql_introspection': 'CWE-200',
+    'subdomain_found': 'CWE-200',
+    'open_port': 'CWE-319',
+    'waf_detected': 'CWE-200',
+    'xss_reflected': 'CWE-79',
+    'sqli_error': 'CWE-89',
+    'path_traversal': 'CWE-22',
+    'ssti': 'CWE-1336',
+    'ssrf_candidate': 'CWE-918',
+}
+
+# Remediation advice for the scanner's own secret/sensitive-file categories
+# (osc/scanner.py's pattern-matching findings). security_audit.py, recon.py,
+# and active_scan.py already attach their own category-specific remediation
+# text at the point each finding is created; this dict only fills the gap for
+# categories scanner.py produces directly, where `context` otherwise holds a
+# matched code snippet (or nothing) rather than fix guidance.
+REMEDIATION_ADVICE = {
+    'api_keys': 'Revoke and rotate the exposed key immediately; remove it from source control '
+                'history; load secrets from environment variables or a secrets manager, never '
+                'commit them.',
+    'passwords': 'Rotate the exposed password immediately; remove it from source control '
+                 'history; store credentials in environment variables or a secrets manager, '
+                 'never in code/config committed to a repo.',
+    'database': 'Rotate the database credentials/connection string immediately; remove it from '
+                'source control history; load it from environment variables or a secrets '
+                'manager, and restrict database network access.',
+    'financial': 'Rotate/revoke the exposed financial credential immediately; remove it from '
+                 'source control history; store it in a secrets manager, never in committed '
+                 'code.',
+    'tokens': 'Revoke and rotate the exposed token immediately; remove it from source control '
+              'history; load tokens from environment variables or a secrets manager.',
+    'private_keys': 'Revoke/reissue the exposed private key immediately - it must be treated as '
+                     'fully compromised; remove it from source control history; store keys '
+                     'outside the web root and never commit them.',
+    'exposed_sensitive_file': 'Remove or restrict access to this file (e.g. deny .env/.git in '
+                               'nginx/Apache config); ensure it is never deployed to a publicly '
+                               'reachable directory.',
+    'config_files': 'Remove this file from the publicly served directory or block access to it '
+                     'via web server config; move sensitive config out of the web root.',
+    'internal_ips': 'Avoid leaking internal network topology in public responses; scrub '
+                     'internal IPs from error messages, comments, and client-facing output.',
+    'sensitive_file_reference': 'Verify the referenced file is not actually reachable; remove '
+                                 'references to sensitive filenames from public-facing '
+                                 'content/comments.',
+    'emails': 'Low severity - consider whether this address needs to be publicly listed, or '
+              'replace with a contact form to reduce scraping/spam exposure.',
+    'directory_listing': 'Disable autoindex/directory listing at the web server (e.g. '
+                          '"Options -Indexes" in Apache, "autoindex off;" in nginx); confirm no '
+                          'sensitive files are reachable in the listed directory in the meantime.',
+    'open_redirect': 'Validate redirect targets against an allowlist of in-scope hosts/paths '
+                      'instead of trusting a query-string parameter directly; if external '
+                      'redirects are required, show an interstitial warning page first.',
+}
+

@@ -7,9 +7,10 @@ import time
 
 from colorama import Fore, Style
 
-from osc.patterns import RISK_LEVELS
+from osc.patterns import RISK_LEVELS, CWE_MAPPINGS
 
-_RISK_HEX = {'HIGH': '#e5484d', 'MEDIUM': '#f5a623', 'LOW': '#30a46c', 'NONE': '#8b8b8b'}
+_RISK_HEX = {'CRITICAL': '#7c0a0a', 'HIGH': '#e5484d', 'MEDIUM': '#f5a623',
+             'LOW': '#30a46c', 'NONE': '#8b8b8b'}
 
 
 def _risk_for(category):
@@ -37,15 +38,20 @@ def write_csv(report, path):
     try:
         with open(path, 'w', encoding='utf-8', newline='') as fh:
             writer = csv.writer(fh)
-            writer.writerow(['category', 'confidence', 'risk', 'url', 'value',
-                             'content_type', 'status_code', 'pattern', 'context'])
+            writer.writerow(['cwe_id', 'category', 'confidence', 'risk', 'url', 'value',
+                             'content_type', 'status_code', 'pattern', 'context',
+                             'evidence', 'informational', 'remediation'])
             for f in report.get('findings', []):
                 cat = f.get('category', '')
+                cwe = f.get('cwe_id') or CWE_MAPPINGS.get(cat, 'CWE-200')
+                rem = f.get('remediation') or f.get('context', '')
                 writer.writerow([
-                    cat, f.get('confidence', ''), _risk_for(cat),
+                    cwe, cat, f.get('confidence', ''), _risk_for(cat),
                     f.get('url', ''), f.get('value', ''),
                     f.get('content_type', ''), f.get('status_code', ''),
                     f.get('pattern', ''), f.get('context', ''),
+                    f.get('evidence', ''), 'yes' if f.get('informational') else '',
+                    rem,
                 ])
         _ok('CSV', path)
     except Exception as exc:
@@ -63,9 +69,13 @@ def _html_document(report):
     def esc(value):
         return html.escape(str(value), quote=True)
 
+    # reproducibility/scope_and_limitations get their own dedicated sections
+    # below (repro_rows/limit_rows) - skip them here so they don't also show
+    # up as raw Python repr text in the generic Scan Information table.
+    _info_own_section = {'reproducibility', 'scope_and_limitations'}
     info_rows = ''.join(
         f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>"
-        for k, v in info.items()
+        for k, v in info.items() if k not in _info_own_section
     )
     summary_rows = ''.join(
         f"<tr><td>{esc(cat)}</td><td class='num'>{esc(n)}</td>"
@@ -75,14 +85,29 @@ def _html_document(report):
 
     finding_rows = ''.join(
         "<tr>"
-        f"<td><span class='pill {_risk_for(f.get('category','')).lower()}'>{esc(f.get('category',''))}</span></td>"
-        f"<td>{esc(f.get('confidence',''))}</td>"
+        f"<td><span class='pill cwe'>{esc(f.get('cwe_id') or CWE_MAPPINGS.get(f.get('category',''), 'CWE-200'))}</span><br/>"
+        f"<span class='pill {_risk_for(f.get('category','')).lower()}'>{esc(f.get('category',''))}</span></td>"
+        f"<td>{esc(f.get('confidence',''))}"
+        f"{' <span class=\"pill info\">info</span>' if f.get('informational') else ''}</td>"
         f"<td class='mono url'>{esc(f.get('url',''))}</td>"
         f"<td class='mono val'>{esc(f.get('value',''))}</td>"
+        f"<td class='mono ev'>{(esc(f.get('evidence','')) or '&mdash;')}</td>"
         f"<td class='mono ctx'>{esc(f.get('context',''))}</td>"
+        f"<td class='mono rem'>{esc(f.get('remediation') or f.get('context','')) or '&mdash;'}</td>"
         "</tr>"
         for f in findings
-    ) or "<tr><td colspan='5' class='muted'>No findings</td></tr>"
+    ) or "<tr><td colspan='7' class='muted'>No findings</td></tr>"
+
+    limitations = info.get('scope_and_limitations', [])
+    limit_rows = ''.join(
+        f"<li>{esc(item)}</li>" for item in limitations
+    ) or '<li class="muted">None recorded for this scan.</li>'
+
+    reproducibility = info.get('reproducibility', {})
+    repro_rows = ''.join(
+        f"<tr><th>{esc(k)}</th><td class='mono'>{esc(v)}</td></tr>"
+        for k, v in reproducibility.items()
+    )
 
     generated = time.strftime('%Y-%m-%d %H:%M:%S')
     return f"""<!doctype html>
@@ -96,7 +121,7 @@ def _html_document(report):
   * {{ box-sizing: border-box; }}
   body {{ margin: 0; background: #0f1115; color: #e6e6e6;
          font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }}
-  .wrap {{ max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }}
+  .wrap {{ max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }}
   h1 {{ font-size: 20px; margin: 0 0 4px; }}
   .sub {{ color: #9aa0aa; font-size: 13px; margin-bottom: 20px; }}
   .badge {{ display: inline-block; padding: 6px 14px; border-radius: 999px;
@@ -112,15 +137,21 @@ def _html_document(report):
   .num {{ text-align: right; }}
   .muted {{ color: #6b7280; text-align: center; }}
   .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }}
-  .val {{ color: #ffd479; word-break: break-all; max-width: 340px; }}
-  .url {{ color: #7cc7ff; word-break: break-all; max-width: 260px; }}
-  .ctx {{ color: #8b929e; word-break: break-all; max-width: 320px; }}
+  .val {{ color: #ffd479; word-break: break-all; max-width: 300px; }}
+  .url {{ color: #7cc7ff; word-break: break-all; max-width: 240px; }}
+  .ev {{ color: #9fe8a4; word-break: break-all; max-width: 260px; white-space: pre-wrap; }}
+  .ctx {{ color: #8b929e; word-break: break-all; max-width: 260px; white-space: pre-wrap; }}
+  .rem {{ color: #a5d6ff; word-break: break-all; max-width: 260px; white-space: pre-wrap; }}
+  .limits {{ margin: 0 0 0 18px; padding: 0; color: #8b929e; font-size: 13px; }}
+  .limits li {{ margin: 4px 0; }}
   .info th {{ width: 180px; }}
   .pill {{ display: inline-block; padding: 2px 9px; border-radius: 999px;
-           font-size: 11px; font-weight: 700; color: #fff; }}
+           font-size: 11px; font-weight: 700; color: #fff; margin-bottom: 2px; }}
+  .pill.cwe {{ background: #6e56cf; font-family: ui-monospace, monospace; }}
   .pill.high {{ background: #e5484d; }}
   .pill.medium {{ background: #f5a623; color: #201600; }}
   .pill.low {{ background: #30a46c; }}
+  .pill.info {{ background: #3b82f6; }}
   footer {{ margin-top: 32px; color: #6b7280; font-size: 12px; }}
 </style>
 </head>
@@ -134,6 +165,12 @@ def _html_document(report):
   <h2>Scan Information</h2>
   <div class="scroll"><table class="info">{info_rows}</table></div>
 
+  <h2>Reproducibility</h2>
+  <div class="scroll"><table class="info">{repro_rows}</table></div>
+
+  <h2>Scope &amp; Limitations</h2>
+  <ul class="limits">{limit_rows}</ul>
+
   <h2>Findings by Category</h2>
   <div class="scroll"><table>
     <tr><th>Category</th><th class="num">Count</th><th>Risk</th></tr>
@@ -142,7 +179,7 @@ def _html_document(report):
 
   <h2>Findings ({esc(len(findings))})</h2>
   <div class="scroll"><table>
-    <tr><th>Category</th><th>Confidence</th><th>URL</th><th>Value</th><th>Context</th></tr>
+    <tr><th>Category / CWE</th><th>Confidence</th><th>URL</th><th>Value</th><th>Evidence</th><th>Context</th><th>Remediation</th></tr>
     {finding_rows}
   </table></div>
 

@@ -24,7 +24,9 @@ import requests
 from requests.adapters import HTTPAdapter
 from colorama import Fore, Style, init
 
-from osc.patterns import PATTERNS, SENSITIVE_FILES, KNOWN_SECRET_PREFIXES, RISK_LEVELS
+from osc.patterns import (
+    PATTERNS, SENSITIVE_FILES, KNOWN_SECRET_PREFIXES, RISK_LEVELS, REMEDIATION_ADVICE, CWE_MAPPINGS,
+)
 from osc import security_audit
 from osc import recon
 
@@ -85,7 +87,7 @@ class EnhancedOSCScanner:
                  verify=False, verbose=False,
                  aggressive=True, wordlist=None, extensions=None,
                  skip_audit=False,
-                 recon=True, subdomain_wordlist=None,
+                 recon=True, subdomain_wordlist=None, ports=None,
                  active=False, active_checks=None):
         self.target = target.rstrip('/')
         self.session_cookie = session_cookie
@@ -108,6 +110,7 @@ class EnhancedOSCScanner:
         # Recon (always on): subdomain enumeration, port scan, tech fingerprint, WAF detection
         self.recon = recon
         self.subdomain_wordlist = subdomain_wordlist
+        self.ports = ports  # None -> recon.COMMON_PORTS
 
         # Active vulnerability probing (-X): XSS/SQLi/traversal/SSTI/SSRF-candidate
         self.active = active
@@ -125,6 +128,7 @@ class EnhancedOSCScanner:
         self.lock = threading.Lock()
         self.start_time = time.time()
         self.baseline = []              # soft-404 fingerprints
+        self.cli_command = ''           # exact CLI invocation (set by cli.py) for audit trail
 
         self.max_content = 10_000_000   # skip bodies larger than 10 MB
         self.scan_chars = 2_000_000     # only regex-scan the first N chars
@@ -252,9 +256,11 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
         --extensions LIST    Comma-separated extensions to try (e.g. php,bak,sql)
         --skip-audit         Skip the security posture audit (headers/cookies/CORS/TLS/methods)
         --subdomain-wordlist FILE  Custom wordlist for DNS subdomain brute-force (default: bundled)
+        --ports LIST         Comma-separated TCP ports to scan during recon (default: ~35-port list)
     -X, --active             Enable active vulnerability probing (XSS/SQLi/traversal/SSTI/SSRF-candidate)
         --active-checks LIST Comma-separated active checks to run (default: all; xss,sqli,traversal,ssti,ssrf)
-    -o, --output FILE        Write JSON report to FILE
+    -o, --output FILE        Write report to FILE (format auto-detected from extension:
+                             .csv -> CSV, .html -> HTML, anything else -> JSON)
         --html FILE          Write HTML report to FILE
         --csv FILE           Write CSV report to FILE
     -v, --verbose            Verbose output (errors + progress)
@@ -411,14 +417,27 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 content_type = response.headers.get('content-type', '').lower()
                 content_length = len(response.content)
 
+                # Catch-all / soft-404 servers return the SAME template for every
+                # nonexistent path (e.g. Next.js on Vercel, or a client-rendered SPA
+                # shell). Without this filter, the homepage's real content (emails,
+                # CDN links, file refs) would be reported as findings on every
+                # brute-forced URL that never existed. This only suppresses
+                # secret/content-pattern scanning, NOT link extraction: a soft-404
+                # match can still be a genuinely real, in-scope page (an SPA route
+                # served from the same shell, for instance), and skipping crawl
+                # continuation from it would silently stall discovery across the
+                # whole site instead of just avoiding duplicate-content noise.
+                is_soft_404 = self._is_soft_404(response)
+
                 if content_length <= self.max_content and self._is_text_content(content_type):
                     text = response.text
-                    self.analyze_content(url, text, content_type)
+                    if not is_soft_404:
+                        self.analyze_content(url, text, content_type)
                     if self.crawl and self._same_scope(url):
                         links = self.extract_links(url, text)
 
                 # Also check whether the URL itself is an exposed sensitive file
-                self.check_sensitive_file_by_url(url, response)
+                self.check_sensitive_file_by_url(url, response, is_soft_404=is_soft_404)
 
             self._check_open_redirect(url, response)
 
@@ -678,11 +697,18 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
         # Binary-ish or unknown: only when the server returned the raw file (non-HTML)
         return 'text/html' not in content_type
 
-    def check_sensitive_file_by_url(self, url, response):
-        """Flag the URL only when it truly serves an exposed sensitive file."""
+    def check_sensitive_file_by_url(self, url, response, is_soft_404=None):
+        """Flag the URL only when it truly serves an exposed sensitive file.
+
+        `is_soft_404` lets a caller that already computed this (scan_url) pass
+        it in and skip the duplicate difflib comparison; if omitted it's
+        computed here as before.
+        """
         if response.status_code != 200:
             return
-        if self._is_soft_404(response):
+        if is_soft_404 is None:
+            is_soft_404 = self._is_soft_404(response)
+        if is_soft_404:
             return
         if len(response.content) > 5_000_000:
             return
@@ -715,6 +741,19 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
 
     def _add_finding(self, finding):
         """Thread-safe, de-duplicated finding recorder + printer."""
+        # Normalize fields so every finding is uniform across report formats.
+        finding.setdefault('status_code', None)
+        finding.setdefault('evidence', '')
+        finding.setdefault('informational', False)
+        # Only fills the gap for scanner.py's own secret/file findings, which
+        # never set this key; security_audit.py/recon.py/active_scan.py already
+        # attach their own remediation text, so setdefault leaves those alone.
+        finding.setdefault('remediation', REMEDIATION_ADVICE.get(finding.get('category'), ''))
+        # Standardize the CWE identifier too: security_audit sets its own
+        # per-check CWE upfront, but scanner/recon/active_scan findings don't,
+        # so the JSON report would otherwise carry findings with no cwe_id even
+        # though CSV/HTML render one via CWE_MAPPINGS lookup.
+        finding.setdefault('cwe_id', CWE_MAPPINGS.get(finding.get('category'), 'CWE-200'))
         key = (finding.get('url'), finding.get('category'), str(finding.get('value'))[:200])
         with self.lock:
             if key in self._finding_keys:
@@ -904,7 +943,8 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
 
         findings_by_category = self._group_by_category()
 
-        risk_colors = {'HIGH': Fore.RED, 'MEDIUM': Fore.YELLOW, 'LOW': Fore.GREEN, 'NONE': Fore.WHITE}
+        risk_colors = {'CRITICAL': Fore.RED + Style.BRIGHT, 'HIGH': Fore.RED,
+                       'MEDIUM': Fore.YELLOW, 'LOW': Fore.GREEN, 'NONE': Fore.WHITE}
         for category, findings in findings_by_category.items():
             risk_level = self.get_risk_level(category)
             color = risk_colors.get(risk_level, Fore.WHITE)
@@ -944,22 +984,90 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
         return RISK_LEVELS.get(category, 'LOW')
 
     def assess_overall_risk(self, findings_by_category):
-        """Assess overall risk based on findings"""
-        risk_scores = {'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
-        for category, findings in findings_by_category.items():
-            risk_scores[self.get_risk_level(category)] += len(findings)
+        """Weighted overall risk: category severity x confidence x volume.
 
-        if risk_scores['HIGH'] > 0:
+        - Informational findings (ports 80/443, banners, WAF/CDN, subdomains)
+          are excluded so expected-but-open services never inflate the verdict.
+        - Per-category volume is dampened (capped at 3) so 100+ low-severity
+          hygiene issues do not by themselves reach CRITICAL.
+        - 'CRITICAL' additionally requires a genuinely severe, confirmed
+          finding (a HIGH-risk category with at least medium confidence):
+          without XSS/SQLi/traversal/TLS-failure/CORS-with-credentials, the
+          report cannot claim the worst severity.
+        """
+        risk_weight = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+        conf_weight = {'high': 1.0, 'medium': 0.7, 'low': 0.4}
+        severe_categories = {'HIGH'}
+
+        score = 0.0
+        has_severe = False
+        has_high_category = False
+        for category, findings in findings_by_category.items():
+            actionable = [f for f in findings if not f.get('informational')]
+            if not actionable:
+                continue
+            category_risk = self.get_risk_level(category)
+            conf = max(conf_weight.get(f.get('confidence', 'low'), 0.4) for f in actionable)
+            score += risk_weight.get(category_risk, 0) * min(len(actionable), 3) * conf
+            if category_risk in severe_categories:
+                has_high_category = True
+                if conf >= 0.7:
+                    has_severe = True
+
+        if has_severe and score >= 8:
+            return 'CRITICAL'
+        if has_severe:
             return 'HIGH'
-        elif risk_scores['MEDIUM'] > 0:
+        if score >= 5:
+            return 'HIGH'
+        if has_high_category:
+            # Any actionable HIGH-risk-category finding - even one only reported
+            # at low confidence by a custom/merged finding - should never round
+            # all the way down to LOW/NONE; low confidence means "verify this
+            # before fixing", not "safe to ignore".
+            score = max(score, 2.5)
+        if score >= 2.5:
             return 'MEDIUM'
-        elif risk_scores['LOW'] > 0:
+        if score > 0:
             return 'LOW'
         return 'NONE'
+
+    def _scope_limitations(self):
+        """Honest list of what this scan did NOT test, so consumers (QA, dev)
+        never mistake the report for proof the application code is secure."""
+        limits = [
+            'Security headers, cookies, CORS, TLS, security.txt and GraphQL checks ran '
+            'against the primary target root only (not each discovered subdomain).',
+        ]
+        if not self.active:
+            limits.append(
+                'Active vulnerability probing (-X) was DISABLED: no XSS, SQL injection, '
+                'path traversal or SSTI payloads were sent, so application-level '
+                'vulnerabilities were NOT tested.',
+            )
+        if not self.verify:
+            limits.append(
+                'TLS certificate verification was DISABLED (--verify not set); TLS/expiry '
+                'findings are advisory and should be re-checked against a verified handshake.',
+            )
+        if not self.active and (not self.skip_audit or self.recon):
+            # The audit (headers/cookies/CORS/TLS/etc.) and recon (ports/banners/WAF/
+            # tech-fingerprint) are both passive/observational; either one running is
+            # enough for this disclaimer to apply, so it isn't gated on skip_audit alone.
+            # It is, however, skipped when active probing (-X) ran: those checks send
+            # real payloads and CAN confirm exploits, so claiming "none are confirmed
+            # exploits" wholesale would be wrong.
+            limits.append(
+                'Findings are passive/config observations (headers, ports, banners); none are '
+                'confirmed exploits. Re-verify each finding with the evidence captured before fixing.',
+            )
+        return limits
 
     def generate_report(self, output_file=None):
         """Build the report dict; write JSON if output_file is given."""
         findings_by_category = self._group_by_category()
+        total = len(self.found_sensitive_data)
+        informational_count = sum(1 for f in self.found_sensitive_data if f.get('informational'))
 
         report = {
             'scan_info': {
@@ -974,9 +1082,21 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 'depth': self.depth,
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'scanner_version': __version__,
+                'reproducibility': {
+                    'command': self.cli_command or 'N/A (library use)',
+                    'python': sys.version.split()[0],
+                    'tls_verify': self.verify,
+                    'active_probing': self.active,
+                    'threads': self.max_threads,
+                    'timeout': self.timeout,
+                    'max_urls': self.max_urls,
+                },
+                'scope_and_limitations': self._scope_limitations(),
             },
             'summary': {
-                'total_findings': len(self.found_sensitive_data),
+                'total_findings': total,
+                'informational_findings': informational_count,
+                'actionable_findings': total - informational_count,
                 'category_counts': {c: len(f) for c, f in findings_by_category.items()},
                 'findings_by_category': findings_by_category,
                 'risk_assessment': self.assess_overall_risk(findings_by_category),
@@ -1020,7 +1140,8 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                   f"tech fingerprint, WAF detection...{Style.RESET_ALL}")
             try:
                 for finding in recon.run_all(self.session, self.target, self.timeout, self.verify,
-                                              subdomain_wordlist=self.subdomain_wordlist):
+                                              subdomain_wordlist=self.subdomain_wordlist,
+                                              ports=self.ports):
                     self._add_finding(finding)
                     if finding.get('category') == 'subdomain_found' and finding.get('url'):
                         discovered_subdomains.add(finding['url'])
@@ -1028,7 +1149,11 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 self._log_error('recon', exc)
 
         print(f"{Fore.GREEN}[*] Discovering URLs...{Style.RESET_ALL}")
-        current = self.discover_urls(self.target)
+        seed_urls = self.discover_urls(self.target)
+        current = set(seed_urls)
+        # Scanned first (see submit_order below) so a small --max-urls budget is
+        # spent on the primary target's own real paths before wordlist noise.
+        priority_urls = list(seed_urls)
 
         if discovered_subdomains:
             # Feed every discovered subdomain in as a crawl seed so it gets the same
@@ -1037,6 +1162,7 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
             # Per-host checks (security headers, TLS, CORS, port scan) still run only
             # against the primary target - see README "Recon" section.
             current |= discovered_subdomains
+            priority_urls.extend(discovered_subdomains)
             print(f"{Fore.MAGENTA}[*] +{len(discovered_subdomains)} discovered subdomain(s) "
                   f"queued for scanning{Style.RESET_ALL}")
 
@@ -1062,9 +1188,28 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 print(f"{Fore.CYAN}[*] Depth {level}: {len(current)} URLs "
                       f"(scanned so far: {len(self.visited_urls)}){Style.RESET_ALL}")
 
+            if level == 0:
+                # Submit the target's own seeds/subdomains ahead of wordlist
+                # brute-force candidates. ThreadPoolExecutor starts queued tasks
+                # in submission order as workers free up, so this - not the
+                # nondeterministic order a plain set would iterate in - decides
+                # which URLs actually get to claim a slot when --max-urls is small.
+                seen_order = set()
+                submit_order = []
+                for url in priority_urls:
+                    if url in current and url not in seen_order:
+                        seen_order.add(url)
+                        submit_order.append(url)
+                for url in current:
+                    if url not in seen_order:
+                        seen_order.add(url)
+                        submit_order.append(url)
+            else:
+                submit_order = current
+
             next_level = set()
             with ThreadPoolExecutor(max_workers=self.max_threads) as executor:
-                futures = {executor.submit(self.scan_url, url): url for url in current}
+                futures = {executor.submit(self.scan_url, url): url for url in submit_order}
                 for future in as_completed(futures):
                     try:
                         for link in future.result():

@@ -47,6 +47,15 @@ def test_run_all_detects_reflected_xss():
     )
     assert len(findings) == 1
     assert findings[0]['category'] == 'xss_reflected'
+    # Regression: active_scan findings used to always have an empty evidence
+    # field, unlike security_audit/recon findings.
+    assert findings[0]['evidence']
+    assert findings[0]['status_code'] == 200
+    # Regression: active_scan findings had no `remediation` text, so the
+    # report's remediation column fell back to `context` (the raw injected
+    # payload) instead of actual fix guidance for the highest-severity checks.
+    assert 'encode' in findings[0]['remediation'].lower()
+    assert findings[0]['remediation'] != findings[0]['context']
 
 
 @responses.activate
@@ -86,6 +95,8 @@ def test_run_all_detects_sql_error():
     )
     assert len(findings) == 1
     assert findings[0]['category'] == 'sqli_error'
+    assert findings[0]['evidence']
+    assert findings[0]['status_code'] == 500
 
 
 @responses.activate
@@ -122,6 +133,7 @@ def test_run_all_detects_path_traversal():
     )
     assert len(findings) == 1
     assert findings[0]['category'] == 'path_traversal'
+    assert findings[0]['evidence']
 
 
 @responses.activate
@@ -161,6 +173,42 @@ def test_run_all_detects_ssti():
 
 
 @responses.activate
+def test_check_ssti_resamples_after_baseline_collision_instead_of_giving_up(monkeypatch):
+    # Regression: the SSTI baseline-collision guard used to bail out of the
+    # whole check on the very first randomly sampled product that collided
+    # with baseline content, instead of resampling - turning a rare page-text
+    # coincidence into a nondeterministic false negative for a genuinely
+    # vulnerable parameter. Force the first sampled pair (13, 13 -> 169) to
+    # collide, and assert the check still finds the vuln via a later sample.
+    samples = iter([13, 13, 14, 14])
+    monkeypatch.setattr(active_scan.random, 'randint', lambda a, b: next(samples))
+
+    def callback(request):
+        query = parse_qs(urlparse(request.url).query)
+        value = query.get('name', [''])[0]
+        try:
+            result = eval(value.strip('{}$#'))  # noqa: S307 - test-only, controlled input
+        except Exception:
+            return (200, {}, f'<html>Hello {value}</html>')
+        return (200, {}, f'<html>Hello {result}</html>')
+
+    responses.add_callback(responses.GET, 'https://example.test/greet', callback=callback)
+    session = requests.Session()
+    from urllib.parse import parse_qsl, urlsplit
+    parts = urlsplit('https://example.test/greet?name=world')
+    pairs = parse_qsl(parts.query)
+    # Baseline page happens to already contain "169" (the first sampled
+    # product) for an unrelated reason (e.g. a price) but not "196".
+    baseline_text = '<html>Hello world - item #169 in stock</html>'
+
+    finding = active_scan._check_ssti(session, parts, pairs, 0, timeout=5, verify=False,
+                                       baseline_text=baseline_text)
+    assert finding is not None
+    assert finding['category'] == 'ssti'
+    assert '196' in finding['value']
+
+
+@responses.activate
 def test_run_all_no_ssti_finding_when_payload_echoed_raw():
     def callback(request):
         query = parse_qs(urlparse(request.url).query)
@@ -185,6 +233,7 @@ def test_check_ssrf_candidate_flags_known_param_names():
     assert finding is not None
     assert finding['category'] == 'ssrf_candidate'
     assert finding['confidence'] == 'low'
+    assert finding['informational'] is True
 
 
 def test_check_ssrf_candidate_ignores_unrelated_params():
