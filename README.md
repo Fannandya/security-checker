@@ -3,9 +3,9 @@
 - **Author:** mamay
 - **Language:** Python 3 (3.8+)
 - **License:** MIT
-- **Version:** 2.1
+- **Version:** 2.2
 
-OSC is a Python-based security tool designed to identify exposed sensitive data on websites and web applications. It detects API keys, authentication tokens, passwords, database credentials, private keys, configuration files, and backup/log files. OSC prioritizes accuracy by implementing soft-404 detection, content-type verification, and entropy filtering to significantly reduce false positives.
+OSC is a Python-based security tool for testing the security posture of websites and web applications. It detects exposed API keys, authentication tokens, passwords, database credentials, private keys, configuration files, and backup/log files, and audits the target's web security configuration — HTTP security headers, cookie flags, CORS policy, risky HTTP methods, TLS/certificate health, directory listing, and open redirects. OSC prioritizes accuracy by implementing soft-404 detection, content-type verification, and entropy filtering to significantly reduce false positives.
 
 > **LEGAL WARNING**
 > Use this tool strictly on web applications you own or have explicit written permission to test. Unauthorized scanning is illegal and prohibited.
@@ -15,6 +15,8 @@ OSC is a Python-based security tool designed to identify exposed sensitive data 
 ## Key Features
 
 - **Secret Detection:** Identifies API keys, JWTs, AWS credentials (`AKIA…`), Google API keys (`AIza…`), GitHub tokens (`ghp_…`), Slack webhooks (`xox…`), SendGrid keys (`SG.…`), Stripe keys (`sk_live_…`), private keys, and connection strings.
+- **Security Posture Audit:** Checks HTTP security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy), cookie flags (`Secure` / `HttpOnly` / `SameSite`), CORS misconfiguration (origin reflection, wildcard + credentials), risky HTTP methods (`PUT`, `DELETE`, `TRACE`, `CONNECT`), and TLS/certificate health (weak protocol, expiry, validation failures). Runs automatically once per scan; disable with `--skip-audit`.
+- **Passive Vulnerability Checks:** Flags open redirects (query parameters that steer a response off-scope) and directory listing / autoindex exposure — detected for free from the normal crawl, with no extra requests.
 - **False Positive Filtering:** Utilizes soft-404 baseline detection, pre-flag content verification, entropy checks, placeholder filtering, and automated deduplication.
 - **Risk Assessment:** Assigns confidence levels (`high`, `medium`, `low`) per finding and provides a comprehensive risk summary.
 - **Intelligent Crawling:** Uses BeautifulSoup for scope-controlled link discovery, respecting depth limits and URL caps.
@@ -38,8 +40,9 @@ security-checker/
     ├── __main__.py       # Package entry point (python -m osc ...)
     ├── cli.py            # Argument parsing and output path management
     ├── scanner.py        # EnhancedOSCScanner main engine
-    ├── patterns.py       # Regex patterns and sensitive file definitions
+    ├── patterns.py       # Regex patterns, sensitive file list, risk levels
     ├── discovery.py      # Aggressive mode and brute-force engine
+    ├── security_audit.py # Headers, cookies, CORS, HTTP methods, TLS checks
     ├── reporting.py      # JSON, HTML, and CSV report generators
     └── wordlists/
         └── common.txt    # Default content-discovery wordlist
@@ -118,6 +121,7 @@ python -m osc  [OPTIONS] TARGET_URL      # Via package (all platforms)
 | `-A, --aggressive` | Enable wordlist-based content discovery (path brute-forcing) |
 | `--wordlist FILE` | Custom wordlist file for aggressive mode (default: bundled) |
 | `--extensions LIST` | Comma-separated extensions to test (e.g., `php,bak,sql`) |
+| `--skip-audit` | Skip the security posture audit (headers/cookies/CORS/TLS/methods) |
 | `-o, --output FILE` | Write JSON report to the specified filename |
 | `--html FILE` | Write HTML report to the specified filename |
 | `--csv FILE` | Write CSV report to the specified filename |
@@ -133,6 +137,23 @@ By default, OSC maps the application structure using standard crawling, sitemaps
 All candidate paths undergo soft-404 filtering, preventing false positives on servers configured to return `200 OK` for nonexistent resources.
 
 *Recommendation: Aggressive mode generates a high volume of requests. Consider increasing `--max-urls` (e.g., `--max-urls 2000`) and utilizing `--delay` to minimize server impact.*
+
+### Security Posture Audit
+
+In addition to secret scanning, OSC runs a lightweight, read-only security audit against the target once per scan (a handful of extra requests total — not per-URL). It is on by default; disable it with `--skip-audit` if you only want the secret-scanning behavior.
+
+| Category | Check | Risk |
+|---|---|---|
+| `security_headers` | Missing `Content-Security-Policy`, `Strict-Transport-Security` (HTTPS only), `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` | Medium |
+| `cookie_security` | Cookies missing `Secure` (HTTPS), `HttpOnly`, or `SameSite` flags | Medium/Low |
+| `cors_misconfiguration` | `Access-Control-Allow-Origin` reflects an arbitrary Origin, or `*` combined with `Access-Control-Allow-Credentials: true` | High |
+| `http_methods` | Risky methods advertised via `OPTIONS` (`PUT`, `DELETE`, `TRACE`, `TRACK`, `CONNECT`) | Medium |
+| `tls_issues` | Weak/legacy TLS protocol negotiated, certificate expired or expiring soon, or certificate validation failure | High |
+| `directory_listing` | Apache/nginx-style autoindex ("Index of /") pages found during the crawl | Medium |
+| `open_redirect` | A query-string parameter drives a redirect to an off-scope host, detected passively from the crawl's redirect chain | Medium |
+| `tech_fingerprint` | `Server` / `X-Powered-By` banners (informational, helps map attack surface) | Low |
+
+These findings flow through the same pipeline as secret findings, so they appear in the console output, the summary report, and every export format (JSON/HTML/CSV).
 
 ### Output Formats
 
@@ -159,6 +180,9 @@ osc -A --wordlist custom.txt --extensions php,bak,sql --delay 0.5 https://exampl
 
 # High-concurrency scan with verbose logging
 osc -t 20 --timeout 15 -v https://example.com
+
+# Secret-scanning only, no security header/CORS/TLS audit
+osc --skip-audit https://example.com
 ```
 
 ---

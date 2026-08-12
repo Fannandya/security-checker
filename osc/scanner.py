@@ -17,7 +17,7 @@ import difflib
 import hashlib
 import threading
 from collections import Counter
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qsl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -74,14 +74,15 @@ for _stream in (sys.stdout, sys.stderr):
 # Initialize colorama
 init(autoreset=True)
 
-__version__ = "2.1"
+__version__ = "2.2"
 
 
 class EnhancedOSCScanner:
     def __init__(self, target, session_cookie=None, max_threads=10, timeout=10,
                  depth=1, max_urls=500, delay=0.0, retries=2, user_agent=None,
                  verify=False, verbose=False,
-                 aggressive=False, wordlist=None, extensions=None):
+                 aggressive=False, wordlist=None, extensions=None,
+                 skip_audit=False):
         self.target = target.rstrip('/')
         self.session_cookie = session_cookie
         self.max_threads = max_threads
@@ -98,6 +99,7 @@ class EnhancedOSCScanner:
         self.aggressive = aggressive
         self.wordlist = wordlist
         self.extensions = extensions  # None -> discovery.DEFAULT_EXTENSIONS
+        self.skip_audit = skip_audit
 
         self.user_agent = user_agent or (
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -203,7 +205,7 @@ class EnhancedOSCScanner:
 {Style.RESET_ALL}
 Target : {self.target}
 Session: {'Provided' if self.session_cookie else 'Not Provided'}
-Mode   : {(Fore.MAGENTA + 'AGGRESSIVE' + Style.RESET_ALL) if self.aggressive else 'standard'}
+Mode   : {(Fore.MAGENTA + 'AGGRESSIVE' + Style.RESET_ALL) if self.aggressive else 'standard'} | Security audit: {'off' if self.skip_audit else 'on'}
 Threads: {self.max_threads} | Timeout: {self.timeout}s | Depth: {self.depth} | Max URLs: {self.max_urls}
 Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} brotli={'on' if _HAS_BROTLI else 'off'}
         """
@@ -232,6 +234,7 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     -A, --aggressive         Enable wordlist content discovery (path brute-force)
         --wordlist FILE      Custom wordlist for aggressive mode (default: bundled)
         --extensions LIST    Comma-separated extensions to try (e.g. php,bak,sql)
+        --skip-audit         Skip the security posture audit (headers/cookies/CORS/TLS/methods)
     -o, --output FILE        Write JSON report to FILE
         --html FILE          Write HTML report to FILE
         --csv FILE           Write CSV report to FILE
@@ -255,6 +258,12 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     • Configuration files detection
     • Email addresses and internal IPs
     • Financial data scanning (Stripe/PayPal/Braintree)
+    • Security header audit (CSP, HSTS, X-Frame-Options, nosniff, Referrer/Permissions-Policy)
+    • Cookie flag audit (Secure / HttpOnly / SameSite)
+    • CORS misconfiguration detection (origin reflection / wildcard+credentials)
+    • Risky HTTP method detection (PUT/DELETE/TRACE/CONNECT)
+    • TLS/certificate health check (weak protocol, expiry, validation failures)
+    • Passive open-redirect and directory-listing (autoindex) detection
     • Real link crawling + aggressive wordlist discovery
     • Multi-threaded scanning + JSON/HTML/CSV reports
 
@@ -379,15 +388,62 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
                 # Also check whether the URL itself is an exposed sensitive file
                 self.check_sensitive_file_by_url(url, response)
 
+            self._check_open_redirect(url, response)
+
         except Exception as exc:
             self._log_error(url, exc)
 
         return links
 
+    _DIR_LISTING_TITLE_RE = re.compile(r'<title>\s*index of\s*/', re.I)
+    _DIR_LISTING_MARKER_RE = re.compile(r'parent directory|\[to parent directory\]', re.I)
+
+    def _check_open_redirect(self, url, response):
+        """Passively flag redirects that land off-scope and were steered by a
+        query-string parameter — no extra requests, reuses the redirect chain
+        `requests` already followed via allow_redirects=True."""
+        if not response.history or not response.url:
+            return
+        parsed_orig = urlparse(url)
+        if not parsed_orig.query or self._same_scope(response.url):
+            return
+
+        final_host = urlparse(response.url).netloc.lower()
+        for key, value in parse_qsl(parsed_orig.query):
+            if not value:
+                continue
+            if final_host and (final_host in value.lower() or value.rstrip('/') in response.url):
+                self._add_finding({
+                    'url': url,
+                    'category': 'open_redirect',
+                    'value': f"Parameter '{key}' steers redirect to external host: {final_host}",
+                    'confidence': 'medium',
+                    'pattern': 'redirect_chain',
+                    'content_type': '',
+                    'context': f"{url} -> {response.url}",
+                })
+                return
+
+    def _check_directory_listing(self, url, content_type, scan_text):
+        if 'text/html' not in content_type:
+            return
+        if self._DIR_LISTING_TITLE_RE.search(scan_text) and self._DIR_LISTING_MARKER_RE.search(scan_text):
+            self._add_finding({
+                'url': url,
+                'category': 'directory_listing',
+                'value': 'Directory listing (autoindex) is enabled',
+                'confidence': 'high',
+                'pattern': 'directory_listing',
+                'content_type': content_type,
+                'context': '',
+            })
+
     def analyze_content(self, url, content, content_type):
         """Analyze content for sensitive data patterns"""
         scan_text = content[:self.scan_chars]
         findings = []
+
+        self._check_directory_listing(url, content_type, scan_text)
 
         for category, compiled in self._compiled.items():
             for regex, value_group, confidence in compiled:
@@ -759,6 +815,14 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
             'sensitive_file_reference': Fore.YELLOW,
             'exposed_sensitive_file': Fore.RED,
             'financial': Fore.RED,
+            'tls_issues': Fore.RED,
+            'cors_misconfiguration': Fore.RED,
+            'directory_listing': Fore.YELLOW,
+            'security_headers': Fore.YELLOW,
+            'cookie_security': Fore.YELLOW,
+            'http_methods': Fore.YELLOW,
+            'open_redirect': Fore.YELLOW,
+            'tech_fingerprint': Fore.CYAN,
         }
 
         color = colors.get(finding['category'], Fore.WHITE)
@@ -804,7 +868,8 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
         print(f"\n{Fore.YELLOW}Overall Risk Assessment:{Style.RESET_ALL}")
         print(f"  {risk_color}{overall_risk} RISK{Style.RESET_ALL}")
 
-        critical_categories = ['api_keys', 'passwords', 'database', 'financial', 'private_keys', 'tokens']
+        critical_categories = ['api_keys', 'passwords', 'database', 'financial', 'private_keys', 'tokens',
+                               'tls_issues', 'cors_misconfiguration']
         critical_findings = []
         for category in critical_categories:
             critical_findings.extend(findings_by_category.get(category, []))
@@ -888,6 +953,16 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
         print(f"{Fore.GREEN}[*] Starting OSC Scan...{Style.RESET_ALL}")
         print(f"{Fore.GREEN}[*] Establishing baseline (soft-404 detection)...{Style.RESET_ALL}")
         self.establish_baseline()
+
+        if not self.skip_audit:
+            print(f"{Fore.GREEN}[*] Auditing security headers, cookies, CORS, "
+                  f"HTTP methods and TLS...{Style.RESET_ALL}")
+            from osc import security_audit
+            try:
+                for finding in security_audit.run_all(self.session, self.target, self.timeout, self.verify):
+                    self._add_finding(finding)
+            except Exception as exc:
+                self._log_error('security_audit', exc)
 
         print(f"{Fore.GREEN}[*] Discovering URLs...{Style.RESET_ALL}")
         current = self.discover_urls(self.target)

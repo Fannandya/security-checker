@@ -31,6 +31,8 @@ def build_parser():
                         help='Enable wordlist content discovery (path brute-force)')
     parser.add_argument('--wordlist', help='Custom wordlist file for aggressive mode (default: bundled)')
     parser.add_argument('--extensions', help='Comma-separated extensions to try (e.g. php,bak,sql)')
+    parser.add_argument('--skip-audit', dest='skip_audit', action='store_true',
+                        help='Skip the security posture audit (headers/cookies/CORS/TLS/methods)')
     parser.add_argument('-o', '--output', help='Write JSON report to FILE')
     parser.add_argument('--html', help='Write HTML report to FILE')
     parser.add_argument('--csv', help='Write CSV report to FILE')
@@ -83,6 +85,7 @@ def main(argv=None):
             aggressive=args.aggressive,
             wordlist=args.wordlist,
             extensions=extensions,
+            skip_audit=args.skip_audit,
         )
         scanner.run_scan(
             output_file=_prepare_output_path(args.output),

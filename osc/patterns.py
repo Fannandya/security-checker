@@ -108,4 +108,13 @@ RISK_LEVELS = {
     'internal_ips': 'MEDIUM',
     'sensitive_file_reference': 'LOW',
     'emails': 'LOW',
+    # Web security posture (osc/security_audit.py) + passive crawl checks
+    'tls_issues': 'HIGH',
+    'cors_misconfiguration': 'HIGH',
+    'directory_listing': 'MEDIUM',
+    'security_headers': 'MEDIUM',
+    'cookie_security': 'MEDIUM',
+    'http_methods': 'MEDIUM',
+    'open_redirect': 'MEDIUM',
+    'tech_fingerprint': 'LOW',
 }
