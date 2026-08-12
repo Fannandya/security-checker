@@ -3,3 +3,14 @@ colorama>=0.4.6
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 brotli>=1.1.0
+
+# Optional: enables DNS subdomain brute-force in recon mode (-R). Without it,
+# recon still runs (crt.sh subdomain lookup, port scan, fingerprint, WAF
+# detection) - only DNS brute-force is skipped. Install with:
+#   pip install "osc[recon]"   or   pip install dnspython
+# dnspython>=2.4.0
+
+# Optional: only needed to run the test suite. Install with:
+#   pip install "osc[dev]"
+# pytest>=7.4.0
+# responses>=0.23.0

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "osc"
-version = "2.2.0"
+version = "2.3.0"
 description = "Open Source Code Scanner - Tool to find exposed sensitive data on web applications."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -19,6 +19,10 @@ dependencies = [
     "lxml>=5.0.0",
     "brotli>=1.1.0"
 ]
+
+[project.optional-dependencies]
+recon = ["dnspython>=2.4.0"]
+dev = ["pytest>=7.4.0", "responses>=0.23.0"]
 
 [project.scripts]
 osc = "osc.cli:main"

@@ -117,4 +117,19 @@ RISK_LEVELS = {
     'http_methods': 'MEDIUM',
     'open_redirect': 'MEDIUM',
     'tech_fingerprint': 'LOW',
+    # Quick-win info-leak checks (osc/security_audit.py)
+    'mixed_content': 'MEDIUM',
+    'sri_missing': 'LOW',
+    'security_txt_missing': 'LOW',
+    'graphql_introspection': 'HIGH',
+    # Recon (osc/recon.py)
+    'subdomain_found': 'LOW',
+    'open_port': 'MEDIUM',
+    'waf_detected': 'LOW',
+    # Active vulnerability probing (osc/active_scan.py)
+    'xss_reflected': 'HIGH',
+    'sqli_error': 'HIGH',
+    'path_traversal': 'HIGH',
+    'ssti': 'HIGH',
+    'ssrf_candidate': 'LOW',
 }

@@ -1,4 +1,4 @@
-# AI Agent Working Guidelines - Security Checker (OSC)
+# AI Agent Guidelines - Security Checker (OSC)
 
 ## 📌 Graphify Guidelines & Token Optimization (MANDATORY FOR ALL AGENTS)
 

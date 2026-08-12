@@ -25,6 +25,8 @@ from requests.adapters import HTTPAdapter
 from colorama import Fore, Style, init
 
 from osc.patterns import PATTERNS, SENSITIVE_FILES, KNOWN_SECRET_PREFIXES, RISK_LEVELS
+from osc import security_audit
+from osc import recon
 
 # urllib3 Retry lives in different places depending on version
 try:
@@ -74,7 +76,7 @@ for _stream in (sys.stdout, sys.stderr):
 # Initialize colorama
 init(autoreset=True)
 
-__version__ = "2.2"
+__version__ = "2.3.0"
 
 
 class EnhancedOSCScanner:
@@ -82,7 +84,9 @@ class EnhancedOSCScanner:
                  depth=1, max_urls=500, delay=0.0, retries=2, user_agent=None,
                  verify=False, verbose=False,
                  aggressive=False, wordlist=None, extensions=None,
-                 skip_audit=False):
+                 skip_audit=False,
+                 recon=False, subdomain_wordlist=None,
+                 active=False, active_checks=None):
         self.target = target.rstrip('/')
         self.session_cookie = session_cookie
         self.max_threads = max_threads
@@ -100,6 +104,14 @@ class EnhancedOSCScanner:
         self.wordlist = wordlist
         self.extensions = extensions  # None -> discovery.DEFAULT_EXTENSIONS
         self.skip_audit = skip_audit
+
+        # Recon (-R): subdomain enumeration, port scan, tech fingerprint, WAF detection
+        self.recon = recon
+        self.subdomain_wordlist = subdomain_wordlist
+
+        # Active vulnerability probing (-X): XSS/SQLi/traversal/SSTI/SSRF-candidate
+        self.active = active
+        self.active_checks = active_checks  # None -> active_scan.ALL_CHECKS
 
         self.user_agent = user_agent or (
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -206,10 +218,15 @@ class EnhancedOSCScanner:
 Target : {self.target}
 Session: {'Provided' if self.session_cookie else 'Not Provided'}
 Mode   : {(Fore.MAGENTA + 'AGGRESSIVE' + Style.RESET_ALL) if self.aggressive else 'standard'} | Security audit: {'off' if self.skip_audit else 'on'}
+Recon  : {(Fore.MAGENTA + 'on' + Style.RESET_ALL) if self.recon else 'off'} | Active probing: {(Fore.RED + 'ON' + Style.RESET_ALL) if self.active else 'off'}
 Threads: {self.max_threads} | Timeout: {self.timeout}s | Depth: {self.depth} | Max URLs: {self.max_urls}
-Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} brotli={'on' if _HAS_BROTLI else 'off'}
+Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} brotli={'on' if _HAS_BROTLI else 'off'} dnspython={'on' if recon._HAS_DNSPYTHON else 'off'}
         """
         print(banner)
+        if self.active:
+            print(f"{Fore.RED}[!] Active vulnerability probing is ENABLED (-X). This sends XSS/SQLi/"
+                  f"traversal/SSTI payloads to in-scope URLs. Only use this against targets you "
+                  f"own or are explicitly authorized to test.{Style.RESET_ALL}")
 
     def print_help(self):
         """Print help information"""
@@ -235,6 +252,10 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
         --wordlist FILE      Custom wordlist for aggressive mode (default: bundled)
         --extensions LIST    Comma-separated extensions to try (e.g. php,bak,sql)
         --skip-audit         Skip the security posture audit (headers/cookies/CORS/TLS/methods)
+    -R, --recon              Enable recon (subdomain enum, port scan, tech fingerprint, WAF detection)
+        --subdomain-wordlist FILE  Custom wordlist for DNS subdomain brute-force (default: bundled)
+    -X, --active             Enable active vulnerability probing (XSS/SQLi/traversal/SSTI/SSRF-candidate)
+        --active-checks LIST Comma-separated active checks to run (default: all; xss,sqli,traversal,ssti,ssrf)
     -o, --output FILE        Write JSON report to FILE
         --html FILE          Write HTML report to FILE
         --csv FILE           Write CSV report to FILE
@@ -251,6 +272,12 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     {Fore.WHITE}Authenticated + deeper crawl:{Style.RESET_ALL}
     python3 osc.py -s "PHPSESSID=abc123" -d 2 https://example.com
 
+    {Fore.WHITE}Recon (subdomains/ports/fingerprint/WAF):{Style.RESET_ALL}
+    python3 osc.py -R https://example.com
+
+    {Fore.WHITE}Active vulnerability probing (authorized targets only):{Style.RESET_ALL}
+    python3 osc.py -X --active-checks xss,sqli https://example.com
+
 {Fore.GREEN}FEATURES:{Style.RESET_ALL}
     • API Keys, Tokens & JWT detection (with entropy filtering)
     • Database credentials & connection strings
@@ -264,6 +291,11 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     • Risky HTTP method detection (PUT/DELETE/TRACE/CONNECT)
     • TLS/certificate health check (weak protocol, expiry, validation failures)
     • Passive open-redirect and directory-listing (autoindex) detection
+    • Mixed-content, missing-SRI, security.txt and GraphQL introspection checks
+    • Recon: subdomain enumeration (crt.sh + optional DNS brute-force), port scan,
+      tech fingerprinting, WAF/CDN detection (-R)
+    • Active probing: reflected XSS, error-based SQLi, path traversal/LFI, SSTI,
+      SSRF-candidate parameters (-X, opt-in)
     • Real link crawling + aggressive wordlist discovery
     • Multi-threaded scanning + JSON/HTML/CSV reports
 
@@ -444,6 +476,10 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
         findings = []
 
         self._check_directory_listing(url, content_type, scan_text)
+
+        if 'text/html' in content_type:
+            findings.extend(security_audit.audit_mixed_content(url, scan_text))
+            findings.extend(security_audit.audit_missing_sri(url, scan_text))
 
         for category, compiled in self._compiled.items():
             for regex, value_group, confidence in compiled:
@@ -823,6 +859,18 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
             'http_methods': Fore.YELLOW,
             'open_redirect': Fore.YELLOW,
             'tech_fingerprint': Fore.CYAN,
+            'mixed_content': Fore.YELLOW,
+            'sri_missing': Fore.YELLOW,
+            'security_txt_missing': Fore.CYAN,
+            'graphql_introspection': Fore.RED,
+            'subdomain_found': Fore.CYAN,
+            'open_port': Fore.YELLOW,
+            'waf_detected': Fore.CYAN,
+            'xss_reflected': Fore.RED,
+            'sqli_error': Fore.RED,
+            'path_traversal': Fore.RED,
+            'ssti': Fore.RED,
+            'ssrf_candidate': Fore.YELLOW,
         }
 
         color = colors.get(finding['category'], Fore.WHITE)
@@ -869,7 +917,8 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
         print(f"  {risk_color}{overall_risk} RISK{Style.RESET_ALL}")
 
         critical_categories = ['api_keys', 'passwords', 'database', 'financial', 'private_keys', 'tokens',
-                               'tls_issues', 'cors_misconfiguration']
+                               'tls_issues', 'cors_misconfiguration', 'graphql_introspection',
+                               'xss_reflected', 'sqli_error', 'path_traversal', 'ssti']
         critical_findings = []
         for category in critical_categories:
             critical_findings.extend(findings_by_category.get(category, []))
@@ -917,6 +966,8 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
                 'target': self.target,
                 'session_provided': bool(self.session_cookie),
                 'aggressive': self.aggressive,
+                'recon': self.recon,
+                'active': self.active,
                 'scan_duration': round(time.time() - self.start_time, 2),
                 'urls_scanned': len(self.visited_urls),
                 'errors': self.errors,
@@ -956,13 +1007,22 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
 
         if not self.skip_audit:
             print(f"{Fore.GREEN}[*] Auditing security headers, cookies, CORS, "
-                  f"HTTP methods and TLS...{Style.RESET_ALL}")
-            from osc import security_audit
+                  f"HTTP methods, TLS, security.txt and GraphQL introspection...{Style.RESET_ALL}")
             try:
                 for finding in security_audit.run_all(self.session, self.target, self.timeout, self.verify):
                     self._add_finding(finding)
             except Exception as exc:
                 self._log_error('security_audit', exc)
+
+        if self.recon:
+            print(f"{Fore.GREEN}[*] Running recon: subdomain enumeration, port scan, "
+                  f"tech fingerprint, WAF detection...{Style.RESET_ALL}")
+            try:
+                for finding in recon.run_all(self.session, self.target, self.timeout, self.verify,
+                                              subdomain_wordlist=self.subdomain_wordlist):
+                    self._add_finding(finding)
+            except Exception as exc:
+                self._log_error('recon', exc)
 
         print(f"{Fore.GREEN}[*] Discovering URLs...{Style.RESET_ALL}")
         current = self.discover_urls(self.target)
@@ -1002,6 +1062,19 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
 
             remaining = max(0, self.max_urls - len(self.visited_urls))
             current = set(list(next_level)[:remaining]) if remaining else set()
+
+        if self.active:
+            from osc import active_scan
+            print(f"\n{Fore.RED}[*] Running active vulnerability probing on "
+                  f"{len(self.visited_urls)} scanned URLs...{Style.RESET_ALL}")
+            try:
+                checks = self.active_checks or active_scan.ALL_CHECKS
+                for finding in active_scan.run_all(
+                        self.session, list(self.visited_urls), self.timeout, self.verify,
+                        checks=checks, max_threads=self.max_threads):
+                    self._add_finding(finding)
+            except Exception as exc:
+                self._log_error('active_scan', exc)
 
         report = self.generate_report(output_file)
 

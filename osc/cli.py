@@ -33,6 +33,16 @@ def build_parser():
     parser.add_argument('--extensions', help='Comma-separated extensions to try (e.g. php,bak,sql)')
     parser.add_argument('--skip-audit', dest='skip_audit', action='store_true',
                         help='Skip the security posture audit (headers/cookies/CORS/TLS/methods)')
+    parser.add_argument('-R', '--recon', action='store_true',
+                        help='Enable recon: subdomain enumeration, port scan, tech fingerprint, WAF detection')
+    parser.add_argument('--subdomain-wordlist', dest='subdomain_wordlist',
+                        help='Custom wordlist for DNS subdomain brute-force (default: bundled; '
+                             'requires dnspython)')
+    parser.add_argument('-X', '--active', action='store_true',
+                        help='Enable active vulnerability probing (XSS/SQLi/traversal/SSTI/SSRF-candidate)')
+    parser.add_argument('--active-checks', dest='active_checks',
+                        help='Comma-separated active checks to run (default: all; '
+                             'xss,sqli,traversal,ssti,ssrf)')
     parser.add_argument('-o', '--output', help='Write JSON report to FILE')
     parser.add_argument('--html', help='Write HTML report to FILE')
     parser.add_argument('--csv', help='Write CSV report to FILE')
@@ -69,6 +79,10 @@ def main(argv=None):
     if args.extensions:
         extensions = [e.strip() for e in args.extensions.split(',') if e.strip()]
 
+    active_checks = None
+    if args.active_checks:
+        active_checks = [c.strip() for c in args.active_checks.split(',') if c.strip()]
+
     try:
         scanner = EnhancedOSCScanner(
             target=target,
@@ -86,6 +100,10 @@ def main(argv=None):
             wordlist=args.wordlist,
             extensions=extensions,
             skip_audit=args.skip_audit,
+            recon=args.recon,
+            subdomain_wordlist=args.subdomain_wordlist,
+            active=args.active,
+            active_checks=active_checks,
         )
         scanner.run_scan(
             output_file=_prepare_output_path(args.output),
