@@ -18,8 +18,8 @@ def build_parser():
     parser.add_argument('--timeout', type=int, default=10, help='Request timeout in seconds (default: 10)')
     parser.add_argument('-d', '--depth', type=int, default=1,
                         help='Crawl depth for in-scope links (0 = seeds only, default: 1)')
-    parser.add_argument('--max-urls', type=int, default=500, dest='max_urls',
-                        help='Maximum URLs to scan (default: 500)')
+    parser.add_argument('--max-urls', type=int, default=2500, dest='max_urls',
+                        help='Maximum URLs to scan (default: 2500)')
     parser.add_argument('--delay', type=float, default=0.0,
                         help='Delay in seconds between requests per worker (default: 0)')
     parser.add_argument('--retries', type=int, default=2,
@@ -27,14 +27,11 @@ def build_parser():
     parser.add_argument('--user-agent', dest='user_agent', help='Custom User-Agent string')
     parser.add_argument('--verify', action='store_true',
                         help='Enable TLS certificate verification (default: disabled)')
-    parser.add_argument('-A', '--aggressive', action='store_true',
-                        help='Enable wordlist content discovery (path brute-force)')
-    parser.add_argument('--wordlist', help='Custom wordlist file for aggressive mode (default: bundled)')
+    parser.add_argument('--wordlist', help='Custom wordlist file for path/endpoint brute-force '
+                                            '(default: bundled)')
     parser.add_argument('--extensions', help='Comma-separated extensions to try (e.g. php,bak,sql)')
     parser.add_argument('--skip-audit', dest='skip_audit', action='store_true',
                         help='Skip the security posture audit (headers/cookies/CORS/TLS/methods)')
-    parser.add_argument('-R', '--recon', action='store_true',
-                        help='Enable recon: subdomain enumeration, port scan, tech fingerprint, WAF detection')
     parser.add_argument('--subdomain-wordlist', dest='subdomain_wordlist',
                         help='Custom wordlist for DNS subdomain brute-force (default: bundled; '
                              'requires dnspython)')
@@ -96,11 +93,11 @@ def main(argv=None):
             user_agent=args.user_agent,
             verify=args.verify,
             verbose=args.verbose,
-            aggressive=args.aggressive,
+            aggressive=True,  # always on - no manual/aggressive mode switch (see README)
             wordlist=args.wordlist,
             extensions=extensions,
             skip_audit=args.skip_audit,
-            recon=args.recon,
+            recon=True,  # always on - no manual/aggressive mode switch (see README)
             subdomain_wordlist=args.subdomain_wordlist,
             active=args.active,
             active_checks=active_checks,

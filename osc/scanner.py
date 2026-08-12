@@ -76,16 +76,16 @@ for _stream in (sys.stdout, sys.stderr):
 # Initialize colorama
 init(autoreset=True)
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 
 class EnhancedOSCScanner:
     def __init__(self, target, session_cookie=None, max_threads=10, timeout=10,
-                 depth=1, max_urls=500, delay=0.0, retries=2, user_agent=None,
+                 depth=1, max_urls=2500, delay=0.0, retries=2, user_agent=None,
                  verify=False, verbose=False,
-                 aggressive=False, wordlist=None, extensions=None,
+                 aggressive=True, wordlist=None, extensions=None,
                  skip_audit=False,
-                 recon=False, subdomain_wordlist=None,
+                 recon=True, subdomain_wordlist=None,
                  active=False, active_checks=None):
         self.target = target.rstrip('/')
         self.session_cookie = session_cookie
@@ -105,7 +105,7 @@ class EnhancedOSCScanner:
         self.extensions = extensions  # None -> discovery.DEFAULT_EXTENSIONS
         self.skip_audit = skip_audit
 
-        # Recon (-R): subdomain enumeration, port scan, tech fingerprint, WAF detection
+        # Recon (always on): subdomain enumeration, port scan, tech fingerprint, WAF detection
         self.recon = recon
         self.subdomain_wordlist = subdomain_wordlist
 
@@ -243,16 +243,14 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     -t, --threads THREADS    Number of threads (default: 10)
         --timeout TIMEOUT    Request timeout in seconds (default: 10)
     -d, --depth DEPTH        Crawl depth for in-scope links (0 = seeds only, default: 1)
-        --max-urls N         Maximum URLs to scan (default: 500)
+        --max-urls N         Maximum URLs to scan (default: 2500)
         --delay SECONDS      Delay between requests per worker (default: 0)
         --retries N          HTTP retries on transient errors (default: 2)
         --user-agent UA      Custom User-Agent string
         --verify             Enable TLS certificate verification (default: off)
-    -A, --aggressive         Enable wordlist content discovery (path brute-force)
-        --wordlist FILE      Custom wordlist for aggressive mode (default: bundled)
+        --wordlist FILE      Custom wordlist for path/endpoint brute-force (default: bundled)
         --extensions LIST    Comma-separated extensions to try (e.g. php,bak,sql)
         --skip-audit         Skip the security posture audit (headers/cookies/CORS/TLS/methods)
-    -R, --recon              Enable recon (subdomain enum, port scan, tech fingerprint, WAF detection)
         --subdomain-wordlist FILE  Custom wordlist for DNS subdomain brute-force (default: bundled)
     -X, --active             Enable active vulnerability probing (XSS/SQLi/traversal/SSTI/SSRF-candidate)
         --active-checks LIST Comma-separated active checks to run (default: all; xss,sqli,traversal,ssti,ssrf)
@@ -262,18 +260,19 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     -v, --verbose            Verbose output (errors + progress)
     -h, --help               Show this help message
 
+{Fore.YELLOW}Every scan always runs full path/endpoint brute-force discovery and recon
+(subdomain enumeration, port scan, tech fingerprint, WAF detection) - there is
+no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESET_ALL}
+
 {Fore.GREEN}EXAMPLES:{Style.RESET_ALL}
-    {Fore.WHITE}Basic scan:{Style.RESET_ALL}
+    {Fore.WHITE}Full scan (discovery + recon + audit, all automatic):{Style.RESET_ALL}
     python3 osc.py https://example.com
 
-    {Fore.WHITE}Aggressive scan with all report formats:{Style.RESET_ALL}
-    python3 osc.py -A --max-urls 2000 -o r.json --html r.html --csv r.csv https://example.com
+    {Fore.WHITE}All report formats, higher URL cap:{Style.RESET_ALL}
+    python3 osc.py --max-urls 5000 -o r.json --html r.html --csv r.csv https://example.com
 
     {Fore.WHITE}Authenticated + deeper crawl:{Style.RESET_ALL}
     python3 osc.py -s "PHPSESSID=abc123" -d 2 https://example.com
-
-    {Fore.WHITE}Recon (subdomains/ports/fingerprint/WAF):{Style.RESET_ALL}
-    python3 osc.py -R https://example.com
 
     {Fore.WHITE}Active vulnerability probing (authorized targets only):{Style.RESET_ALL}
     python3 osc.py -X --active-checks xss,sqli https://example.com
@@ -292,11 +291,12 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     • TLS/certificate health check (weak protocol, expiry, validation failures)
     • Passive open-redirect and directory-listing (autoindex) detection
     • Mixed-content, missing-SRI, security.txt and GraphQL introspection checks
-    • Recon: subdomain enumeration (crt.sh + optional DNS brute-force), port scan,
-      tech fingerprinting, WAF/CDN detection (-R)
+    • Path/endpoint brute-force discovery and recon (subdomain enumeration via crt.sh
+      + optional DNS brute-force, port scan, tech fingerprinting, WAF/CDN detection)
+      - always on, no flag needed
     • Active probing: reflected XSS, error-based SQLi, path traversal/LFI, SSTI,
       SSRF-candidate parameters (-X, opt-in)
-    • Real link crawling + aggressive wordlist discovery
+    • Real link crawling + endpoint brute-force discovery
     • Multi-threaded scanning + JSON/HTML/CSV reports
 
 {Fore.RED}LEGAL DISCLAIMER:{Style.RESET_ALL}
@@ -1014,6 +1014,7 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
             except Exception as exc:
                 self._log_error('security_audit', exc)
 
+        discovered_subdomains = set()
         if self.recon:
             print(f"{Fore.GREEN}[*] Running recon: subdomain enumeration, port scan, "
                   f"tech fingerprint, WAF detection...{Style.RESET_ALL}")
@@ -1021,11 +1022,23 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
                 for finding in recon.run_all(self.session, self.target, self.timeout, self.verify,
                                               subdomain_wordlist=self.subdomain_wordlist):
                     self._add_finding(finding)
+                    if finding.get('category') == 'subdomain_found' and finding.get('url'):
+                        discovered_subdomains.add(finding['url'])
             except Exception as exc:
                 self._log_error('recon', exc)
 
         print(f"{Fore.GREEN}[*] Discovering URLs...{Style.RESET_ALL}")
         current = self.discover_urls(self.target)
+
+        if discovered_subdomains:
+            # Feed every discovered subdomain in as a crawl seed so it gets the same
+            # secret-pattern / directory-listing / mixed-content / open-redirect checks
+            # as the primary target's own pages (not just listed as a bare finding).
+            # Per-host checks (security headers, TLS, CORS, port scan) still run only
+            # against the primary target - see README "Recon" section.
+            current |= discovered_subdomains
+            print(f"{Fore.MAGENTA}[*] +{len(discovered_subdomains)} discovered subdomain(s) "
+                  f"queued for scanning{Style.RESET_ALL}")
 
         if self.aggressive:
             from osc import discovery

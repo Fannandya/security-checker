@@ -1,15 +1,17 @@
 """Recon module: subdomain enumeration, lightweight port scan, tech
 fingerprinting, and WAF/CDN detection.
 
-Bundled behind the -R/--recon flag (mirrors -A for discovery.py) since it
-adds real request/DNS volume and, for subdomains, goes beyond the original
-crawled host. Findings are plain dicts shaped like scanner findings so they
+Runs automatically on every scan (no opt-in flag - see scanner.py), unlike
+active_scan.py which stays opt-in because it sends real exploit-style
+payloads. Findings are plain dicts shaped like scanner findings so they
 flow straight through the existing report pipeline (JSON/HTML/CSV).
 """
 
 import os
+import random
 import re
 import socket
+import string
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote, urlparse
 
@@ -181,10 +183,24 @@ def _resolves(host):
         return False
 
 
+def _has_wildcard_dns(domain):
+    """True if the zone resolves *any* subdomain (wildcard A/CNAME record).
+
+    Without this check, a brute-force pass against a wildcard domain would
+    report every single wordlist entry as a "discovered" subdomain - a 100%
+    false-positive result set that looks like real findings but proves nothing.
+    """
+    probe = ''.join(random.choices(string.ascii_lowercase + string.digits, k=24))
+    return _resolves(f'{probe}.{domain}')
+
+
 def enumerate_subdomains_bruteforce(domain, wordlist=None, max_threads=20):
-    """Active DNS brute-force. No-op (returns []) if dnspython isn't installed."""
+    """Active DNS brute-force. No-op (returns []) if dnspython isn't installed
+    or the zone uses wildcard DNS (every name would resolve -> unreliable)."""
     findings = []
     if not _HAS_DNSPYTHON:
+        return findings
+    if _has_wildcard_dns(domain):
         return findings
 
     words = load_subdomain_wordlist(wordlist)

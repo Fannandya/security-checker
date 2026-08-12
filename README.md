@@ -3,9 +3,9 @@
 - **Author:** mamay
 - **Language:** Python 3 (3.8+)
 - **License:** MIT
-- **Version:** 2.3.0
+- **Version:** 2.4.0
 
-OSC is a Python-based security tool for testing the security posture of websites and web applications. It detects exposed API keys, authentication tokens, passwords, database credentials, private keys, configuration files, and backup/log files, and audits the target's web security configuration — HTTP security headers, cookie flags, CORS policy, risky HTTP methods, TLS/certificate health, mixed content, missing SRI, security.txt, GraphQL introspection, directory listing, and open redirects. Optional recon (`-R`) adds subdomain enumeration, port scanning, tech fingerprinting, and WAF detection; optional active probing (`-X`) tests for reflected XSS, error-based SQLi, path traversal, and SSTI. OSC prioritizes accuracy by implementing soft-404 detection, content-type verification, and entropy filtering to significantly reduce false positives.
+OSC is a Python-based security tool for testing the security posture of websites and web applications. Every scan is a full scan by design — there is no separate "basic" vs "aggressive" mode to remember to enable. Running `osc TARGET_URL` with no flags always performs: secret detection (API keys, tokens, passwords, database credentials, private keys, config/backup/log files), a full security posture audit (HTTP security headers, cookie flags, CORS policy, risky HTTP methods, TLS/certificate health, mixed content, missing SRI, security.txt, GraphQL introspection, directory listing, open redirects), path/endpoint brute-force discovery, and recon (subdomain enumeration, port scanning, tech fingerprinting, WAF detection) against every discovered endpoint. The one exception is active vulnerability probing (`-X`) — reflected XSS, error-based SQLi, path traversal, and SSTI — which stays opt-in because it sends real test payloads rather than just observing the response, and is the check with the most legal/impact weight. OSC prioritizes accuracy by implementing soft-404 detection, content-type verification, entropy filtering, and (as of 2.4) baseline-aware SSTI detection and wildcard-DNS-aware subdomain brute-force, to significantly reduce false positives.
 
 > **LEGAL WARNING**
 > Use this tool strictly on web applications you own or have explicit written permission to test. Unauthorized scanning is illegal and prohibited.
@@ -15,15 +15,14 @@ OSC is a Python-based security tool for testing the security posture of websites
 ## Key Features
 
 - **Secret Detection:** Identifies API keys, JWTs, AWS credentials (`AKIA…`), Google API keys (`AIza…`), GitHub tokens (`ghp_…`), Slack webhooks (`xox…`), SendGrid keys (`SG.…`), Stripe keys (`sk_live_…`), private keys, and connection strings.
-- **Security Posture Audit:** Checks HTTP security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy), cookie flags (`Secure` / `HttpOnly` / `SameSite`), CORS misconfiguration (origin reflection, wildcard + credentials), risky HTTP methods (`PUT`, `DELETE`, `TRACE`, `CONNECT`), and TLS/certificate health (weak protocol, expiry, validation failures). Runs automatically once per scan; disable with `--skip-audit`.
+- **Security Posture Audit (always on):** Checks HTTP security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy), cookie flags (`Secure` / `HttpOnly` / `SameSite`), CORS misconfiguration (origin reflection, wildcard + credentials), risky HTTP methods (`PUT`, `DELETE`, `TRACE`, `CONNECT`), and TLS/certificate health (weak protocol, expiry, validation failures). Disable with `--skip-audit` if you only want raw secret-scanning.
 - **Passive Vulnerability Checks:** Flags open redirects, directory listing / autoindex exposure, mixed content (HTTP subresources on an HTTPS page), and missing Subresource Integrity (SRI) on cross-origin scripts — all detected for free from the normal crawl, with no extra requests.
 - **Info-Leak Checks:** `security.txt` (RFC 9116) presence and GraphQL introspection exposure, run once per scan alongside the security posture audit.
-- **Recon (`-R`):** Subdomain enumeration (certificate-transparency lookup via crt.sh, plus optional DNS brute-force), a lightweight common-port scan, technology fingerprinting (server/framework/CMS + version), and WAF/CDN detection.
-- **Active Vulnerability Probing (`-X`, opt-in):** Reflected XSS, error-based SQL injection, path traversal/LFI, basic Server-Side Template Injection (SSTI), and an SSRF-candidate-parameter heuristic — tested against query parameters on already-crawled, in-scope URLs only.
-- **False Positive Filtering:** Utilizes soft-404 baseline detection, pre-flag content verification, entropy checks, placeholder filtering, and automated deduplication.
+- **Endpoint Discovery + Recon (always on):** Wordlist-based path/endpoint brute-force (soft-404 aware, to avoid alert fatigue on catch-all servers) combined with subdomain enumeration (certificate-transparency lookup via crt.sh, plus wildcard-DNS-aware DNS brute-force), a lightweight common-port scan, technology fingerprinting (server/framework/CMS + version), and WAF/CDN detection — every discovered subdomain/endpoint gets the same security posture audit as the original target.
+- **Active Vulnerability Probing (`-X`, opt-in):** Reflected XSS, error-based SQL injection, path traversal/LFI, baseline-aware Server-Side Template Injection (SSTI), and an SSRF-candidate-parameter heuristic — tested against query parameters on already-crawled, in-scope URLs only. The one part of OSC that sends real test payloads instead of just observing, so it stays opt-in.
+- **False Positive Filtering:** Utilizes soft-404 baseline detection, pre-flag content verification, entropy checks, placeholder filtering, automated deduplication, wildcard-DNS detection (subdomain brute-force), and baseline comparison for SSTI detection.
 - **Risk Assessment:** Assigns confidence levels (`high`, `medium`, `low`) per finding and provides a comprehensive risk summary.
 - **Intelligent Crawling:** Uses BeautifulSoup for scope-controlled link discovery, respecting depth limits and URL caps.
-- **Aggressive Mode (`-A`):** Features wordlist-based path discovery while maintaining soft-404 awareness to prevent alert fatigue on catch-all servers.
 - **Multi-format Reporting:** Exports findings to JSON, HTML, and CSV. Outputs are cleanly managed within an isolated `output/` directory.
 - **Configurable Engine:** Supports multi-threading, request delays, custom user agents, flexible session cookies, and robust retry mechanisms.
 
@@ -122,18 +121,16 @@ python -m osc  [OPTIONS] TARGET_URL      # Via package (all platforms)
 | `-t, --threads N` | Number of concurrent threads (default: 10) |
 | `--timeout SECONDS` | Request timeout in seconds (default: 10) |
 | `-d, --depth N` | In-scope link crawl depth (0 = seeds only, default: 1) |
-| `--max-urls N` | Maximum number of URLs to scan (default: 500) |
+| `--max-urls N` | Maximum number of URLs to scan (default: 2500 — sized for the bundled wordlist's ~2,000 brute-force candidates) |
 | `--delay SECONDS` | Delay between requests per worker (default: 0) |
 | `--retries N` | Retries on transient HTTP errors (default: 2) |
 | `--user-agent UA` | Custom User-Agent string |
 | `--verify` | Enable TLS certificate verification (default: disabled) |
-| `-A, --aggressive` | Enable wordlist-based content discovery (path brute-forcing) |
-| `--wordlist FILE` | Custom wordlist file for aggressive mode (default: bundled) |
+| `--wordlist FILE` | Custom wordlist file for path/endpoint brute-force (default: bundled) |
 | `--extensions LIST` | Comma-separated extensions to test (e.g., `php,bak,sql`) |
 | `--skip-audit` | Skip the security posture audit (headers/cookies/CORS/TLS/methods) |
-| `-R, --recon` | Enable recon: subdomain enumeration, port scan, tech fingerprint, WAF detection |
 | `--subdomain-wordlist FILE` | Custom wordlist for DNS subdomain brute-force (default: bundled; requires `dnspython`) |
-| `-X, --active` | Enable active vulnerability probing (XSS/SQLi/traversal/SSTI/SSRF-candidate) |
+| `-X, --active` | Enable active vulnerability probing (XSS/SQLi/traversal/SSTI/SSRF-candidate) — the only opt-in mode |
 | `--active-checks LIST` | Comma-separated active checks to run (default: all; `xss,sqli,traversal,ssti,ssrf`) |
 | `-o, --output FILE` | Write JSON report to the specified filename |
 | `--html FILE` | Write HTML report to the specified filename |
@@ -143,17 +140,17 @@ python -m osc  [OPTIONS] TARGET_URL      # Via package (all platforms)
 
 *Note: All output reports are automatically saved to the `output/` directory unless an absolute path is provided.*
 
-### Aggressive Mode (`-A`)
+### Path/Endpoint Discovery (always on)
 
-By default, OSC maps the application structure using standard crawling, sitemaps, robots.txt, and common paths. When aggressive mode (`-A`) is enabled, OSC performs targeted path discovery using the bundled wordlist (`osc/wordlists/common.txt`) and applies extension permutations (e.g., testing `backup`, `backup.php`, `backup.bak`).
+There is no separate "basic" vs "aggressive" mode — every scan maps the application structure using crawling, sitemaps, robots.txt, common paths, *and* wordlist-based brute-force discovery (`osc/wordlists/common.txt`) with extension permutations (e.g., testing `backup`, `backup.php`, `backup.bak`) in a single pass.
 
 All candidate paths undergo soft-404 filtering, preventing false positives on servers configured to return `200 OK` for nonexistent resources.
 
-*Recommendation: Aggressive mode generates a high volume of requests. Consider increasing `--max-urls` (e.g., `--max-urls 2000`) and utilizing `--delay` to minimize server impact.*
+*Because this generates a high volume of requests by default, `--max-urls` defaults to 2500 (roughly the bundled wordlist's candidate count) and can be raised further (e.g. `--max-urls 5000`) for large sites; use `--delay` to reduce server impact.*
 
-### Security Posture Audit
+### Security Posture Audit (always on)
 
-In addition to secret scanning, OSC runs a lightweight, read-only security audit against the target once per scan (a handful of extra requests total — not per-URL). It is on by default; disable it with `--skip-audit` if you only want the secret-scanning behavior.
+In addition to secret scanning, OSC runs a lightweight, read-only security audit against every scanned target and discovered endpoint/subdomain (a handful of extra requests per host — not per-URL). Disable it with `--skip-audit` if you only want the secret-scanning behavior.
 
 | Category | Check | Risk |
 |---|---|---|
@@ -172,18 +169,20 @@ In addition to secret scanning, OSC runs a lightweight, read-only security audit
 
 These findings flow through the same pipeline as secret findings, so they appear in the console output, the summary report, and every export format (JSON/HTML/CSV).
 
-### Recon (`-R, --recon`)
+### Recon (always on)
 
-Opt-in recon that goes beyond the crawled pages themselves — enable it explicitly since it adds DNS/port-scan volume and can surface hosts beyond the original target:
+Recon goes beyond the crawled pages themselves and runs automatically on every scan — no flag needed:
 
 | Category | Check | Risk |
 |---|---|---|
-| `subdomain_found` | Subdomains discovered via certificate-transparency logs (crt.sh) and, if `dnspython` is installed, DNS brute-force against `osc/wordlists/subdomains.txt` (override with `--subdomain-wordlist`) | Low |
+| `subdomain_found` | Subdomains discovered via certificate-transparency logs (crt.sh) and, if `dnspython` is installed, DNS brute-force against `osc/wordlists/subdomains.txt` (override with `--subdomain-wordlist`). Brute-force automatically detects and skips wildcard-DNS domains (where every name resolves) to avoid a flood of false positives. | Low |
 | `open_port` | Common TCP ports (21, 22, 23, 25, 53, 80, 110, 143, 443, 3306, 3389, 5432, 6379, 8080, 8443) found open on the target host | Medium (DB/RDP/Redis/Telnet ports) / Low (others) |
 | `tech_fingerprint` | Server/framework/CMS detection from headers, cookies, and HTML (WordPress, Drupal, Joomla, Laravel, Django, Express, Next.js, nginx/Apache/IIS versions, etc.), with a CVE-search link for the detected version | Low |
 | `waf_detected` | WAF/CDN fingerprint (Cloudflare, Akamai, Sucuri, Imperva Incapsula, AWS WAF, F5 BIG-IP ASM) — informational, helps set expectations for `-X` | Low |
 
 DNS brute-force is entirely optional: without `dnspython` installed, recon still runs crt.sh lookup, port scan, fingerprinting, and WAF detection. Install it with `pip install "osc[recon]"` or `pip install dnspython`.
+
+*Every subdomain recon discovers is fed back into the crawl queue, so it gets the same secret-pattern scanning, sensitive-file/directory-listing checks, and mixed-content/SRI/open-redirect checks as the primary target's own pages. The one-shot per-host checks (security headers, cookie flags, CORS, TLS/certificate, `security.txt`, GraphQL introspection, port scan) still run against the primary target only — running those against every discovered subdomain too is on the roadmap.*
 
 ### Active Vulnerability Probing (`-X, --active`)
 
@@ -210,45 +209,42 @@ Only error-based SQLi is used (no time-based/blind payloads) and every check is 
 ## Examples
 
 ```bash
-# Standard unauthenticated scan
+# Full scan: discovery + recon + audit + secret detection, all automatic
 osc https://example.com
 
 # Authenticated scan with increased crawl depth
 osc -s "PHPSESSID=abc123" -d 2 https://example.com
 
-# Aggressive mode with multi-format reporting
-osc -A --max-urls 2000 -o result.json --html result.html --csv result.csv https://example.com
+# All report formats, higher URL cap for a large site
+osc --max-urls 5000 -o result.json --html result.html --csv result.csv https://example.com
 
 # Custom wordlist and extensions with request delays
-osc -A --wordlist custom.txt --extensions php,bak,sql --delay 0.5 https://example.com
+osc --wordlist custom.txt --extensions php,bak,sql --delay 0.5 https://example.com
 
 # High-concurrency scan with verbose logging
 osc -t 20 --timeout 15 -v https://example.com
 
-# Secret-scanning only, no security header/CORS/TLS audit
+# Secret-scanning + discovery only, no security header/CORS/TLS audit
 osc --skip-audit https://example.com
-
-# Recon: subdomains, port scan, tech fingerprint, WAF detection
-osc -R https://example.com
 
 # Active vulnerability probing (authorized targets only), narrowed to XSS + SQLi
 osc -X --active-checks xss,sqli https://example.com
 
-# Full scan: aggressive discovery + recon + active probing + all report formats
-osc -A -R -X --max-urls 2000 -o result.json --html result.html --csv result.csv https://example.com
+# Everything, including active probing, plus all report formats
+osc -X --max-urls 5000 -o result.json --html result.html --csv result.csv https://example.com
 ```
 
 ---
 
 ## Usage as a Library
 
-OSC is designed to be easily integrated into broader Python automation workflows.
+OSC is designed to be easily integrated into broader Python automation workflows. `aggressive` and `recon` default to `True` (matching the CLI's always-on behavior); pass `False` explicitly if your integration wants a narrower scan.
 
 ```python
 from osc.scanner import EnhancedOSCScanner
 
-# Initialize the scanner
-scanner = EnhancedOSCScanner("https://example.com", depth=1, aggressive=True)
+# Initialize the scanner (aggressive discovery + recon on by default)
+scanner = EnhancedOSCScanner("https://example.com", depth=1)
 
 # Execute the scan and export reports
 report = scanner.run_scan(output_file="report.json", html_file="report.html")

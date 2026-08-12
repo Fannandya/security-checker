@@ -140,11 +140,18 @@ def _check_traversal(session, parts, pairs, index, timeout, verify):
 _SSTI_TEMPLATES = ('{{%d*%d}}', '${%d*%d}', '#{%d*%d}')
 
 
-def _check_ssti(session, parts, pairs, index, timeout, verify):
+def _check_ssti(session, parts, pairs, index, timeout, verify, baseline_text=''):
     key, original = pairs[index]
     a, b = random.randint(13, 19), random.randint(13, 19)
     product = str(a * b)
+    product_re = re.compile(r'(?<!\d)' + re.escape(product) + r'(?!\d)')
     original = original or ''
+    # Guard against the product number showing up on the page for reasons that
+    # have nothing to do with template evaluation (a price, a pixel width, a
+    # year fragment, ...). A number this small (169-361) collides with ordinary
+    # page content often enough that a bare substring check is not trustworthy.
+    if product_re.search(baseline_text or ''):
+        return None
     for template in _SSTI_TEMPLATES:
         payload = template % (a, b)
         test_url = _build_url(parts, pairs, index, payload)
@@ -154,7 +161,7 @@ def _check_ssti(session, parts, pairs, index, timeout, verify):
             continue
         # Guard against the product coincidentally already being present via the
         # original param value rather than actual template evaluation.
-        if product in resp.text and str(a) not in original and str(b) not in original:
+        if product_re.search(resp.text) and str(a) not in original and str(b) not in original:
             return _finding(
                 test_url, 'ssti',
                 f"Possible Server-Side Template Injection: parameter '{key}' evaluates "
@@ -199,7 +206,7 @@ def run_all(session, urls, timeout, verify, checks=None, max_threads=10):
 
     for url, parts, pairs in _urls_with_params(urls):
         baseline_text = ''
-        if 'sqli' in checks:
+        if 'sqli' in checks or 'ssti' in checks:
             try:
                 baseline_text = session.get(url, timeout=timeout, verify=verify).text
             except Exception:
@@ -223,7 +230,7 @@ def run_all(session, urls, timeout, verify, checks=None, max_threads=10):
             if result:
                 results.append(result)
         if 'ssti' in checks:
-            result = _check_ssti(session, parts, pairs, index, timeout, verify)
+            result = _check_ssti(session, parts, pairs, index, timeout, verify, baseline_text)
             if result:
                 results.append(result)
         if 'ssrf' in checks:
