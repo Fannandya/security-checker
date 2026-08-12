@@ -27,7 +27,7 @@ OSC is a Python-based security tool designed to identify exposed sensitive data 
 ## Project Structure
 
 ```
-osc/
+security-checker/
 ├── osc.py                # Command-line launcher (e.g., python3 osc.py ...)
 ├── requirements.txt      # Dependencies
 ├── README.md             # Documentation
@@ -49,33 +49,57 @@ osc/
 
 ## Installation
 
-OSC requires **Python 3.8+** and `pip`.
+OSC requires **Python 3.8+** and `pip`, and works the same way on **Windows**, **macOS**, and **Linux**.
+
+> Run each command on its own line and wait for it to finish before running the next one — pasting multiple commands as a single line can make `venv` misbehave.
+
+### 1. Clone the repository
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/Fannandya/security-checker.git
-cd osc
+cd security-checker
+```
 
-# 2. Create and activate a virtual environment (Recommended)
-python3 -m venv venv
-source venv/bin/activate        # On Windows: venv\Scripts\activate
+### 2. Create a virtual environment (recommended)
 
-# 3. Install the package
+<table>
+<tr><th>OS</th><th>Shell</th><th>Command</th></tr>
+<tr><td>macOS / Linux</td><td>bash / zsh</td><td><code>python3 -m venv venv</code></td></tr>
+<tr><td>Windows</td><td>PowerShell / Command Prompt</td><td><code>py -m venv venv</code></td></tr>
+</table>
+
+### 3. Activate the virtual environment
+
+<table>
+<tr><th>OS</th><th>Shell</th><th>Command</th></tr>
+<tr><td>macOS / Linux</td><td>bash / zsh</td><td><code>source venv/bin/activate</code></td></tr>
+<tr><td>Windows</td><td>Command Prompt (cmd.exe)</td><td><code>venv\Scripts\activate.bat</code></td></tr>
+<tr><td>Windows</td><td>PowerShell</td><td><code>venv\Scripts\Activate.ps1</code></td></tr>
+</table>
+
+Your prompt should now be prefixed with `(venv)`. If PowerShell blocks the activation script with an execution-policy error, run this once and try again: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`.
+
+### 4. Install the package
+
+```bash
 pip install .
 ```
 
 *Note for Ubuntu/Debian (including WSL) users: Using a virtual environment is strongly recommended to comply with externally managed environment restrictions.*
 
+*Note for Windows users without a venv: if `python`/`pip` aren't recognized, reinstall Python from [python.org](https://www.python.org/downloads/) and check "Add python.exe to PATH" during setup, or use the `py` launcher (`py -m pip install .`).*
+
 ---
 
 ## Usage
 
-OSC can be executed either via the global command, the launcher script, or the Python module:
+OSC can be executed either via the global command, the launcher script, or the Python module. Use `python3` on macOS/Linux and `python` (or `py`) on Windows:
 
 ```bash
-osc [OPTIONS] TARGET_URL                 # Installed via pip
-python3 osc.py [OPTIONS] TARGET_URL      # Via launcher
-python -m osc  [OPTIONS] TARGET_URL      # Via package
+osc [OPTIONS] TARGET_URL                 # Installed via pip (all platforms)
+python3 osc.py [OPTIONS] TARGET_URL      # Via launcher (macOS/Linux)
+python  osc.py [OPTIONS] TARGET_URL      # Via launcher (Windows)
+python -m osc  [OPTIONS] TARGET_URL      # Via package (all platforms)
 ```
 
 ### Options
@@ -155,6 +179,21 @@ report = scanner.run_scan(output_file="report.json", html_file="report.html")
 # Access the generated metrics programmatically
 print("Overall Risk Level:", report["summary"]["risk_assessment"])
 ```
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `can't open file '.../install': No such file or directory` | Typed `python3 install .` instead of `pip install .` | Use `pip install .` (not `python3 install .`) |
+| `Unable to create directory '.../venv/bin/activate'` | Two commands were pasted/run as one line (e.g. `python3 -m venv venv source venv/bin/activate`) | Run the create and activate commands separately, one per line |
+| `ModuleNotFoundError: No module named 'osc.cli'` after `pip install .` | Ran `pip install .` from the wrong folder (not the repo root containing `pyproject.toml`) | `cd` into the cloned `security-checker` folder first, then `pip install .` |
+| `'venv1\Scripts\Activate.ps1' cannot be loaded because running scripts is disabled` (Windows) | PowerShell execution policy blocks the script | Run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned`, then retry activation |
+| `error: externally-managed-environment` (Debian/Ubuntu/WSL) | Trying to `pip install` outside a virtual environment | Create and activate a venv first (see Installation), then `pip install .` |
+| `command not found: osc` / `'osc' is not recognized` | Virtual environment isn't activated, or install happened in a different venv | Re-activate the venv (step 3) before running `osc` |
+
+To leave the virtual environment when you're done, run `deactivate` (same command on all platforms).
 
 ---
 
