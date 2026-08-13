@@ -313,6 +313,25 @@ def _probe_port(host, port, timeout):
         return False
 
 
+def _port_scan_reliable(host, timeout, probes=3):
+    """False if the network path to `host` appears to accept a TCP connect
+    on *any* port - a transparent proxy, VPN, captive portal, or other
+    middlebox sitting between the scanner and the target, rather than the
+    target itself listening. Without this guard, scan_ports run from such a
+    network would report the entire COMMON_PORTS list as "open" - a 100%
+    false-positive result set that looks like real findings but proves
+    nothing. Same failure mode _has_wildcard_dns already guards against for
+    subdomain enumeration; here the probes are random high ports (49152-
+    65535, the dynamic/private range) that should be closed on any real host
+    and were never handed out by IANA to a fixed service.
+    """
+    for _ in range(probes):
+        port = random.randint(49152, 65535)
+        if _probe_port(host, port, timeout):
+            return False
+    return True
+
+
 def _grab_banner(host, port, timeout):
     """Best-effort, read-only service banner for an already-open port.
 
@@ -346,6 +365,18 @@ def _grab_banner(host, port, timeout):
 
 def scan_ports(host, ports=None, timeout=1.5, max_threads=20, grab_banners=True):
     ports = ports or COMMON_PORTS
+    if not _port_scan_reliable(host, timeout):
+        return [_finding(
+            host, 'port_scan_unreliable',
+            'Port scan skipped: random unassigned ports accepted a TCP connection, '
+            'which means something between the scanner and the target - a proxy, VPN, '
+            'firewall, or other middlebox - is intercepting every connection attempt '
+            'rather than the target actually listening. Any open_port findings from '
+            'this network path would be false positives.', 'low',
+            'Re-run the scan from a network path with no transparent TCP interception '
+            '(e.g. not behind a corporate proxy or VPN) to get a trustworthy port scan.',
+            evidence=f'Random high ports on {host} all reported open', informational=True,
+        )]
     open_ports = []
     with ThreadPoolExecutor(max_workers=max_threads) as executor:
         futures = {executor.submit(_probe_port, host, port, timeout): port for port in ports}

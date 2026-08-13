@@ -252,6 +252,30 @@ def test_probe_port_returns_false_on_connection_error():
     assert recon._probe_port('this-host-should-not-resolve.invalid', 1, 0.5) is False
 
 
+def test_port_scan_reliable_when_canary_ports_are_closed(monkeypatch):
+    monkeypatch.setattr(recon, '_probe_port', lambda host, port, timeout: False)
+    assert recon._port_scan_reliable('example.test', 0.5) is True
+
+
+def test_port_scan_unreliable_when_canary_port_is_open(monkeypatch):
+    # A transparent proxy/VPN/firewall that accepts every TCP connection makes
+    # a random unassigned high port come back "open" too - that's the signal
+    # the scan can't be trusted, not that the target listens on it.
+    monkeypatch.setattr(recon, '_probe_port', lambda host, port, timeout: True)
+    assert recon._port_scan_reliable('example.test', 0.5) is False
+
+
+def test_scan_ports_skips_open_port_findings_when_scan_is_unreliable(monkeypatch):
+    # Every port "open", including ones never passed in - simulates a
+    # middlebox that intercepts all connections instead of a real scan.
+    monkeypatch.setattr(recon, '_probe_port', lambda host, port, timeout: True)
+    findings = recon.scan_ports('example.test', ports=[80, 443, 3306], grab_banners=False)
+    assert len(findings) == 1
+    assert findings[0]['category'] == 'port_scan_unreliable'
+    assert findings[0]['informational'] is True
+    assert not any(f['category'] == 'open_port' for f in findings)
+
+
 # ---------------------------------------------------------------------- #
 # _grab_banner / banner enrichment in scan_ports
 # ---------------------------------------------------------------------- #
