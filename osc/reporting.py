@@ -69,6 +69,9 @@ def _html_document(report):
     def esc(value):
         return html.escape(str(value), quote=True)
 
+    def info_pill(finding):
+        return " <span class='pill info'>info</span>" if finding.get('informational') else ''
+
     # reproducibility/scope_and_limitations get their own dedicated sections
     # below (repro_rows/limit_rows) - skip them here so they don't also show
     # up as raw Python repr text in the generic Scan Information table.
@@ -88,7 +91,7 @@ def _html_document(report):
         f"<td><span class='pill cwe'>{esc(f.get('cwe_id') or CWE_MAPPINGS.get(f.get('category',''), 'CWE-200'))}</span><br/>"
         f"<span class='pill {_risk_for(f.get('category','')).lower()}'>{esc(f.get('category',''))}</span></td>"
         f"<td>{esc(f.get('confidence',''))}"
-        f"{' <span class=\"pill info\">info</span>' if f.get('informational') else ''}</td>"
+        f"{info_pill(f)}</td>"
         f"<td class='mono url'>{esc(f.get('url',''))}</td>"
         f"<td class='mono val'>{esc(f.get('value',''))}</td>"
         f"<td class='mono ev'>{(esc(f.get('evidence','')) or '&mdash;')}</td>"
