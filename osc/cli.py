@@ -22,8 +22,8 @@ def build_parser():
     parser.add_argument('--timeout', type=int, default=10, help='Request timeout in seconds (default: 10)')
     parser.add_argument('-d', '--depth', type=int, default=1,
                         help='Crawl depth for in-scope links (0 = seeds only, default: 1)')
-    parser.add_argument('--max-urls', type=int, default=2500, dest='max_urls',
-                        help='Maximum URLs to scan (default: 2500)')
+    parser.add_argument('--max-urls', type=int, default=10000, dest='max_urls',
+                        help='Maximum URLs to scan (default: 10000)')
     parser.add_argument('--delay', type=float, default=0.0,
                         help='Delay in seconds between requests per worker (default: 0)')
     parser.add_argument('--retries', type=int, default=2,

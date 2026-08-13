@@ -87,7 +87,7 @@ __version__ = "2.4.0"
 
 class EnhancedOSCScanner:
     def __init__(self, target, session_cookie=None, max_threads=10, timeout=10,
-                 depth=1, max_urls=2500, delay=0.0, retries=2, user_agent=None,
+                 depth=1, max_urls=10000, delay=0.0, retries=2, user_agent=None,
                  verify=False, verbose=False,
                  aggressive=True, wordlist=None, extensions=None,
                  skip_audit=False,
@@ -251,7 +251,7 @@ Engine : bs4={'on' if _HAS_BS4 else 'off'} lxml={'on' if _HAS_LXML else 'off'} b
     -t, --threads THREADS    Number of threads (default: 10)
         --timeout TIMEOUT    Request timeout in seconds (default: 10)
     -d, --depth DEPTH        Crawl depth for in-scope links (0 = seeds only, default: 1)
-        --max-urls N         Maximum URLs to scan (default: 2500)
+        --max-urls N         Maximum URLs to scan (default: 10000)
         --delay SECONDS      Delay between requests per worker (default: 0)
         --retries N          HTTP retries on transient errors (default: 2)
         --user-agent UA      Custom User-Agent string

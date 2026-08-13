@@ -121,7 +121,7 @@ python -m osc  [OPTIONS] TARGET_URL      # Via package (all platforms)
 | `-t, --threads N` | Number of concurrent threads (default: 10) |
 | `--timeout SECONDS` | Request timeout in seconds (default: 10) |
 | `-d, --depth N` | In-scope link crawl depth (0 = seeds only, default: 1) |
-| `--max-urls N` | Maximum number of URLs to scan (default: 2500 — sized for the bundled wordlist's ~2,000 brute-force candidates) |
+| `--max-urls N` | Maximum number of URLs to scan (default: 10000 — sized for the bundled wordlist's ~6,000 brute-force candidates) |
 | `--delay SECONDS` | Delay between requests per worker (default: 0) |
 | `--retries N` | Retries on transient HTTP errors (default: 2) |
 | `--user-agent UA` | Custom User-Agent string |
@@ -146,7 +146,7 @@ There is no separate "basic" vs "aggressive" mode — every scan maps the applic
 
 All candidate paths undergo soft-404 filtering, preventing false positives on servers configured to return `200 OK` for nonexistent resources.
 
-*Because this generates a high volume of requests by default, `--max-urls` defaults to 2500 (roughly the bundled wordlist's candidate count) and can be raised further (e.g. `--max-urls 5000`) for large sites; use `--delay` to reduce server impact.*
+*Because this generates a high volume of requests by default, `--max-urls` defaults to 10000 (roughly the bundled wordlist's candidate count) and can be raised further (e.g. `--max-urls 20000`) for large sites; use `--delay` to reduce server impact.*
 
 ### Security Posture Audit (always on)
 
@@ -316,7 +316,7 @@ This section is a plain-language dictionary of the terms, settings, and finding 
 | `Threads` | Number of concurrent request workers (default: 10). Higher values scan faster but are more aggressive toward the server. |
 | `Timeout` | Per-request timeout in seconds (default: 10). Requests that hang longer than this are treated as failed. |
 | `Depth` | How many levels of links to follow from the seed pages (default: 1). `0` means only the seed URLs are scanned. |
-| `Max URLs` | The cap on the total number of URLs scanned (default: 2500). Raise it (e.g. `--max-urls 5000`) for large sites. |
+| `Max URLs` | The cap on the total number of URLs scanned (default: 10000). Raise it (e.g. `--max-urls 20000`) for large sites. |
 
 ### `Engine:` library indicators
 
