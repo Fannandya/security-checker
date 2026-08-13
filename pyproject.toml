@@ -4,13 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "osc"
-version = "2.4.0"
+version = "2.5.0"
 description = "Open Source Code Scanner - Tool to find exposed sensitive data on web applications."
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
-    {name = "mamay"}
+    {name = "Fannandya"}
+]
+maintainers = [
+    {name = "Fannandya"}
+]
+keywords = [
+    "security", "security-scanner", "security-audit", "pentesting",
+    "vulnerability-scanner", "osint", "recon", "secret-detection",
+    "static-analysis", "owasp",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
 ]
 dependencies = [
     "requests>=2.31.0",
@@ -19,6 +39,12 @@ dependencies = [
     "lxml>=5.0.0",
     "brotli>=1.1.0"
 ]
+
+[project.urls]
+Homepage = "https://github.com/Fannandya/security-checker"
+Repository = "https://github.com/Fannandya/security-checker"
+Issues = "https://github.com/Fannandya/security-checker/issues"
+Changelog = "https://github.com/Fannandya/security-checker/blob/main/README.md"
 
 [project.optional-dependencies]
 recon = ["dnspython>=2.4.0"]

@@ -1,9 +1,9 @@
 # Open Source Code Scanner (OSC)
 
-- **Author:** mamay
+- **Author:** [Fannandya](https://github.com/Fannandya)
 - **Language:** Python 3 (3.8+)
-- **License:** MIT
-- **Version:** 2.4.0
+- **License:** [AGPL-3.0-or-later](LICENSE)
+- **Version:** 2.5.0
 
 OSC is a Python-based security tool for testing the security posture of websites and web applications. Every scan is a full scan by design — there is no separate "basic" vs "aggressive" mode to remember to enable. Running `osc TARGET_URL` with no flags always performs: secret detection (API keys, tokens, passwords, database credentials, private keys, config/backup/log files), a full security posture audit (HTTP security headers, cookie flags, CORS policy, risky HTTP methods, TLS/certificate health, mixed content, missing SRI, security.txt, GraphQL introspection, directory listing, open redirects), path/endpoint brute-force discovery, and recon (subdomain enumeration, port scanning, tech fingerprinting, WAF detection) against every discovered endpoint. The one exception is active vulnerability probing (`-X`) — reflected XSS, error-based SQLi, path traversal, and SSTI — which stays opt-in because it sends real test payloads rather than just observing the response, and is the check with the most legal/impact weight. OSC prioritizes accuracy by implementing soft-404 detection, content-type verification, entropy filtering, and (as of 2.4) baseline-aware SSTI detection, wildcard-DNS-aware subdomain brute-force, and interception-aware port scanning, to significantly reduce false positives.
 
@@ -278,6 +278,22 @@ To leave the virtual environment when you're done, run `deactivate` (same comman
 ## Disclaimer
 
 The developer assumes no liability and is not responsible for any misuse or damage caused by this program.
+
+---
+
+## License
+
+OSC is licensed under the **[GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)](LICENSE)** — free and open source, and it stays that way for every derivative.
+
+In plain language, this means:
+
+- **You can** use, study, modify, and redistribute OSC for free, including commercially.
+- **You can** fork it and build your own version under a different name.
+- **If you distribute a modified version — including running it as a hosted web service/SaaS that users interact with over a network** — you must make the complete corresponding source code of *your* version available to those users, under the same AGPL-3.0-or-later license. This is stricter than a typical GPL project: even offering it purely as an online service counts as "distribution" under AGPLv3 Section 13, so a modified version can't be kept closed-source just because the code itself was never handed out.
+- **You must** keep the copyright notice, the [LICENSE](LICENSE) file, and the [NOTICE](NOTICE) file intact, and preserve the `SPDX-License-Identifier` headers in source files you keep.
+- **You must not** represent a modified/forked version as the official OSC project or as being authored by someone other than its actual authors — see [AUTHORS.md](AUTHORS.md) and [NOTICE](NOTICE).
+
+This project was previously MIT-licensed; it moved to AGPL-3.0-or-later at v2.5.0 specifically to prevent the "fork it, close the source, sell it" pattern that a permissive license doesn't guard against. See [CITATION.cff](CITATION.cff) for a machine-readable citation record, and [CONTRIBUTING.md](CONTRIBUTING.md) if you'd like to contribute back to the original project instead of maintaining a separate fork.
 
 ---
 

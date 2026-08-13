@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2024-2026 Fannandya
+# Part of OSC (Open Source Code Scanner) - https://github.com/Fannandya/security-checker
+
 """
 OSC - Open Source Code Scanner (core engine)
 Accurate secret & sensitive-file discovery for authorized web testing.

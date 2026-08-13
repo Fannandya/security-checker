@@ -1,0 +1,24 @@
+OSC (Open Source Code Scanner)
+Copyright (C) 2024-2026 Fannandya
+https://github.com/Fannandya/security-checker
+
+This program is licensed under the GNU Affero General Public License
+version 3 or later (AGPL-3.0-or-later). See the LICENSE file for the
+full license text.
+
+Attribution
+-----------
+If you distribute this software, a modified version of it, or run it
+(or a modified version of it) as a network service, you must:
+
+  1. Keep this NOTICE file and the LICENSE file intact.
+  2. Preserve the copyright and license headers in the source files.
+  3. Make the complete corresponding source code of your version
+     available to users who interact with it over a network, per
+     AGPLv3 Section 13.
+  4. Clearly state that your version is a modified version of OSC and
+     is not the original/official project unless you have written
+     permission from the original author to represent it as such.
+
+This NOTICE file does not modify the terms of the AGPLv3 license; it is
+a plain-language summary. The LICENSE file is the governing legal text.

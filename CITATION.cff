@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "OSC (Open Source Code Scanner)"
+abstract: >-
+  A Python-based security tool for testing the security posture of
+  websites and web applications: secret detection, security posture
+  audit, endpoint discovery, recon, and opt-in active vulnerability
+  probing.
+authors:
+  - name: "Fannandya"
+    alias: "Fannandya"
+repository-code: "https://github.com/Fannandya/security-checker"
+url: "https://github.com/Fannandya/security-checker"
+license: "AGPL-3.0-or-later"
+version: "2.5.0"
+date-released: "2026-08-13"
+keywords:
+  - security
+  - security-scanner
+  - pentesting
+  - vulnerability-scanner
+  - secret-detection
+  - osint
