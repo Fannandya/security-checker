@@ -8,8 +8,7 @@ version = "2.5.0"
 description = "Open Source Code Scanner - Tool to find exposed sensitive data on web applications."
 readme = "README.md"
 requires-python = ">=3.8"
-license = "AGPL-3.0-or-later"
-license-files = ["LICENSE"]
+license = {text = "AGPL-3.0-or-later"}
 authors = [
     {name = "Fannandya"}
 ]
