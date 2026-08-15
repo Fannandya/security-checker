@@ -96,7 +96,7 @@ Your prompt should now be prefixed with `(venv)`. If PowerShell blocks the activ
 pip install .
 ```
 
-*Note for Ubuntu/Debian (including WSL) users: Using a virtual environment is strongly recommended to comply with externally managed environment restrictions.*
+*Note for Ubuntu/Debian (including WSL) users: Using a virtual environment is strongly recommended to comply with externally managed environment restrictions. If `python3 -m venv venv` fails because the `venv` module is missing, install it first with `sudo apt install -y python3-venv python3-full`. Always activate the venv (`source venv/bin/activate`) before running `pip install .` — otherwise you may hit `error: externally-managed-environment` (PEP 668). See Troubleshooting below.*
 
 *Note for Windows users without a venv: if `python`/`pip` aren't recognized, reinstall Python from [python.org](https://www.python.org/downloads/) and check "Add python.exe to PATH" during setup, or use the `py` launcher (`py -m pip install .`).*
 
@@ -181,7 +181,7 @@ Recon goes beyond the crawled pages themselves and runs automatically on every s
 | `tech_fingerprint` | Server/framework/CMS detection from headers, cookies, and HTML (WordPress, Drupal, Joomla, Laravel, Django, Express, Next.js, nginx/Apache/IIS versions, etc.), with a CVE-search link for the detected version | Low |
 | `waf_detected` | WAF/CDN fingerprint (Cloudflare, Akamai, Sucuri, Imperva Incapsula, AWS WAF, F5 BIG-IP ASM) — informational, helps set expectations for `-X` | Low |
 
-DNS brute-force is entirely optional: without `dnspython` installed, recon still runs crt.sh lookup, port scan, fingerprinting, and WAF detection. Install it with `pip install "osc[recon]"` or `pip install dnspython`.
+DNS brute-force is entirely optional: without `dnspython` installed, recon still runs crt.sh lookup, port scan, fingerprinting, and WAF detection. To enable it, from the project folder with the venv active run `pip install "osc[recon]"` (or `pip install dnspython`), then re-run the scan — the console banner should show `dnspython=on`.
 
 *Every subdomain recon discovers is fed back into the crawl queue, so it gets the same secret-pattern scanning, sensitive-file/directory-listing checks, and mixed-content/SRI/open-redirect checks as the primary target's own pages. The one-shot per-host checks (security headers, cookie flags, CORS, TLS/certificate, `security.txt`, GraphQL introspection, port scan) still run against the primary target only — running those against every discovered subdomain too is on the roadmap.*
 

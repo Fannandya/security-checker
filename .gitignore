@@ -46,3 +46,6 @@ share/python-wheels/
 .vscode/
 *.swp
 *.swo
+
+# macOS
+.DS_Store
