@@ -17,6 +17,11 @@ from osc import reporting
 from osc.web.models import ScanRequest, ScanStatus
 
 
+import re
+
+_ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
+
+
 class _LogCaptureStream:
     """Stream wrapper that captures written lines into an in-memory buffer while optionally forwarding."""
 
@@ -35,8 +40,9 @@ class _LogCaptureStream:
 
         for char in text:
             if char == '\n':
-                line = "".join(self._current_line).rstrip('\r')
-                self.target_list.append(line)
+                raw_line = "".join(self._current_line).rstrip('\r')
+                clean_line = _ANSI_ESCAPE.sub('', raw_line)
+                self.target_list.append(clean_line)
                 self._current_line = []
             else:
                 self._current_line.append(char)

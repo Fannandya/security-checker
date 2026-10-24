@@ -26,13 +26,27 @@
       }
     }
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     /* Custom scrollbar for terminal */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0b0f19; }
-    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
-    .terminal-font { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    ::-webkit-scrollbar { width: 7px; height: 7px; }
+    ::-webkit-scrollbar-track { background: #070b14; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    .terminal-font {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-feature-settings: "liga" 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .log-line {
+      transition: background-color 0.15s ease;
+    }
+    .log-line:hover {
+      background-color: rgba(255, 255, 255, 0.04);
+    }
   </style>
 </head>
 <body class="bg-[#090d16] text-slate-100 min-h-screen flex flex-col font-sans antialiased">
@@ -224,24 +238,72 @@
       </div>
 
       <!-- Live Terminal Console -->
-      <div class="bg-[#050811] border border-gray-800 rounded-lg overflow-hidden">
-        <div class="bg-[#0d1424] px-4 py-2 border-b border-gray-800 flex items-center justify-between text-xs">
+      <div id="terminalContainer" class="bg-[#050811] border border-gray-800 rounded-xl overflow-hidden shadow-2xl transition-all duration-300">
+        <!-- Terminal Header Toolbar -->
+        <div class="bg-[#0b101d] px-4 py-2.5 border-b border-gray-800 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+          <!-- Window Dots & Title -->
           <div class="flex items-center space-x-2">
-            <span class="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
-            <span class="w-3 h-3 rounded-full bg-yellow-500/80 inline-block"></span>
-            <span class="w-3 h-3 rounded-full bg-green-500/80 inline-block"></span>
-            <span class="ml-2 font-mono text-gray-400">Terminal Log Stream</span>
+            <span class="w-3 h-3 rounded-full bg-red-500/80 inline-block shadow-sm"></span>
+            <span class="w-3 h-3 rounded-full bg-yellow-500/80 inline-block shadow-sm"></span>
+            <span class="w-3 h-3 rounded-full bg-green-500/80 inline-block shadow-sm"></span>
+            <span class="ml-2 font-mono font-semibold text-gray-200">Terminal Log Stream</span>
+            <span id="logCounter" class="text-[11px] text-gray-400 font-mono">(0 lines)</span>
           </div>
-          <div class="flex items-center space-x-3">
-            <label class="flex items-center space-x-1 cursor-pointer text-gray-400">
-              <input type="checkbox" id="autoscrollCheck" checked class="rounded border-gray-700 bg-gray-900 text-emerald-500">
-              <span>Auto-scroll</span>
+
+          <!-- Controls: Filter, Font size, Wrap, Autoscroll, Copy, Clear, Expand -->
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Search / Filter -->
+            <div class="relative flex items-center">
+              <input 
+                type="text" 
+                id="logSearchInput" 
+                oninput="filterLogs()" 
+                placeholder="🔍 Filter logs..." 
+                class="bg-gray-950/90 border border-gray-700/80 rounded px-2.5 py-1 text-xs text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 w-28 sm:w-36 transition"
+              >
+              <button onclick="clearFilter()" id="clearFilterBtn" class="hidden absolute right-2 text-gray-400 hover:text-white text-xs">✕</button>
+            </div>
+
+            <!-- Font Size Controls -->
+            <div class="flex items-center bg-gray-900 border border-gray-700/80 rounded px-1.5 py-0.5 space-x-1 select-none">
+              <span class="text-[11px] text-gray-400 font-medium mr-1">Font</span>
+              <button type="button" onclick="changeFontSize(-1)" class="w-5 h-5 flex items-center justify-center text-gray-300 hover:text-white hover:bg-gray-800 rounded font-bold text-xs" title="Decrease font size">-</button>
+              <span id="fontSizeDisplay" class="text-[11px] text-gray-200 font-mono w-8 text-center font-semibold">13px</span>
+              <button type="button" onclick="changeFontSize(1)" class="w-5 h-5 flex items-center justify-center text-gray-300 hover:text-white hover:bg-gray-800 rounded font-bold text-xs" title="Increase font size">+</button>
+            </div>
+
+            <!-- Wrap Toggle -->
+            <label class="flex items-center space-x-1.5 cursor-pointer text-gray-300 hover:text-white select-none">
+              <input type="checkbox" id="wrapCheck" onchange="toggleWrap()" class="rounded border-gray-700 bg-gray-900 text-emerald-500 focus:ring-0">
+              <span class="text-[11px] font-medium">Wrap</span>
             </label>
-            <button onclick="clearTerminal()" class="text-gray-400 hover:text-white">Clear</button>
+
+            <!-- Auto-scroll Toggle -->
+            <label class="flex items-center space-x-1.5 cursor-pointer text-gray-300 hover:text-white select-none">
+              <input type="checkbox" id="autoscrollCheck" checked class="rounded border-gray-700 bg-gray-900 text-emerald-500 focus:ring-0">
+              <span class="text-[11px] font-medium">Auto-scroll</span>
+            </label>
+
+            <!-- Copy All Logs -->
+            <button type="button" onclick="copyLogs()" class="px-2.5 py-1 rounded bg-gray-800/90 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white transition flex items-center space-x-1" title="Copy raw logs">
+              <span id="copyIcon">📋</span>
+              <span id="copyText">Copy</span>
+            </button>
+
+            <!-- Clear -->
+            <button type="button" onclick="clearTerminal()" class="px-2 py-1 rounded bg-gray-800/60 hover:bg-gray-700 text-gray-400 hover:text-white transition">Clear</button>
+
+            <!-- Expand / Height Toggle -->
+            <button type="button" onclick="toggleTerminalExpand()" id="expandBtn" class="px-2 py-1 rounded bg-gray-800/60 hover:bg-gray-700 text-gray-400 hover:text-white transition text-xs" title="Toggle Height">⛶</button>
           </div>
         </div>
-        <div id="terminalBody" class="p-4 terminal-font text-xs text-gray-300 h-64 overflow-y-auto space-y-1 select-text">
-          <div class="text-gray-500">Ready to execute. Log output will appear here in real time...</div>
+
+        <!-- Terminal Output Viewport -->
+        <div 
+          id="terminalBody" 
+          class="p-4 terminal-font text-[13.5px] leading-relaxed text-slate-200 h-80 overflow-y-auto overflow-x-auto space-y-0.5 select-text bg-[#070b14]"
+        >
+          <div class="text-gray-500 italic py-2">Ready to execute. Log output will appear here in real time...</div>
         </div>
       </div>
     </div>
@@ -402,29 +464,292 @@
       }
     }
 
+    let allLogLines = [];
+    let currentFontSize = 13.5;
+    let isExpanded = false;
+
+    function changeFontSize(delta) {
+      currentFontSize = Math.max(11, Math.min(20, currentFontSize + delta));
+      const terminal = document.getElementById('terminalBody');
+      terminal.style.fontSize = `${currentFontSize}px`;
+      terminal.style.lineHeight = `${currentFontSize * 1.65}px`;
+      document.getElementById('fontSizeDisplay').innerText = `${Math.round(currentFontSize)}px`;
+    }
+
+    function toggleWrap() {
+      const wrap = document.getElementById('wrapCheck').checked;
+      const terminal = document.getElementById('terminalBody');
+      if (wrap) {
+        terminal.classList.remove('whitespace-pre');
+        terminal.classList.add('break-words');
+      } else {
+        terminal.classList.add('whitespace-pre');
+        terminal.classList.remove('break-words');
+      }
+    }
+
+    function toggleTerminalExpand() {
+      const terminal = document.getElementById('terminalBody');
+      const btn = document.getElementById('expandBtn');
+      isExpanded = !isExpanded;
+      if (isExpanded) {
+        terminal.classList.remove('h-80');
+        terminal.classList.add('h-[550px]');
+        btn.innerText = '🗗';
+        btn.title = 'Collapse Height';
+      } else {
+        terminal.classList.remove('h-[550px]');
+        terminal.classList.add('h-80');
+        btn.innerText = '⛶';
+        btn.title = 'Expand Height';
+      }
+    }
+
+    async function copyLogs() {
+      const btn = document.getElementById('copyText');
+      const icon = document.getElementById('copyIcon');
+      const rawText = allLogLines.map(l => l.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')).join('\n');
+      try {
+        await navigator.clipboard.writeText(rawText);
+        btn.innerText = 'Copied!';
+        icon.innerText = '✓';
+        setTimeout(() => {
+          btn.innerText = 'Copy';
+          icon.innerText = '📋';
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to copy', err);
+      }
+    }
+
     function clearTerminal() {
+      allLogLines = [];
       document.getElementById('terminalBody').innerHTML = '';
+      updateLogCounter();
+    }
+
+    function updateLogCounter() {
+      const counter = document.getElementById('logCounter');
+      if (counter) {
+        counter.innerText = `(${allLogLines.length} lines)`;
+      }
+    }
+
+    function filterLogs() {
+      const query = document.getElementById('logSearchInput').value.toLowerCase().trim();
+      const clearBtn = document.getElementById('clearFilterBtn');
+      if (query) {
+        clearBtn.classList.remove('hidden');
+      } else {
+        clearBtn.classList.add('hidden');
+      }
+
+      const terminal = document.getElementById('terminalBody');
+      terminal.innerHTML = '';
+
+      const filtered = query 
+        ? allLogLines.filter(line => line.toLowerCase().includes(query))
+        : allLogLines;
+
+      if (filtered.length === 0) {
+        const noMatch = document.createElement('div');
+        noMatch.className = 'text-gray-500 italic py-2';
+        noMatch.innerText = query ? `No logs matching "${query}"` : 'No logs recorded.';
+        terminal.appendChild(noMatch);
+        return;
+      }
+
+      filtered.forEach(line => {
+        terminal.appendChild(formatLogLine(line));
+      });
+
+      if (document.getElementById('autoscrollCheck').checked) {
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+    }
+
+    function clearFilter() {
+      document.getElementById('logSearchInput').value = '';
+      document.getElementById('clearFilterBtn').classList.add('hidden');
+      filterLogs();
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function formatLogLine(rawLine) {
+      let line = rawLine.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trimEnd();
+
+      const div = document.createElement('div');
+      div.className = 'log-line py-0.5 px-2 rounded font-mono transition-colors';
+
+      if (!line || line.trim() === '') {
+        div.className += ' h-2';
+        return div;
+      }
+
+      const trimmed = line.trim();
+
+      // Divider lines (e.g. ==================== or --------------------)
+      if (/^[=\-─_]{10,}$/.test(trimmed)) {
+        div.innerHTML = '<div class="border-t border-gray-800/80 my-1.5 opacity-60"></div>';
+        return div;
+      }
+
+      // ASCII banner lines (e.g. with ██ block characters)
+      if (trimmed.includes('██') || trimmed.includes('█')) {
+        div.className += ' text-emerald-400 font-bold whitespace-pre overflow-x-auto text-[11px] leading-tight select-none opacity-85';
+        div.innerText = line;
+        return div;
+      }
+
+      // Summary Report Header
+      if (trimmed.includes('OSC SCAN SUMMARY REPORT')) {
+        div.innerHTML = `
+          <div class="my-2.5 py-1 px-3 rounded-md bg-emerald-950/70 border border-emerald-700/60 text-emerald-300 font-bold text-center tracking-wider uppercase text-xs flex items-center justify-center space-x-2 shadow-sm">
+            <span>🛡️</span>
+            <span>OSC SCAN SUMMARY REPORT</span>
+          </div>`;
+        return div;
+      }
+
+      // Findings: [CATEGORY] (CONFIDENCE) URL
+      const findingMatch = trimmed.match(/^\[([A-Z0-9_ ]+)\](?:\s*\(([A-Za-z]+)\))?\s*(https?:\/\/\S+|[^\s]+.*)?$/);
+      if (findingMatch) {
+        const rawCat = findingMatch[1].trim();
+        const conf = findingMatch[2];
+        const url = findingMatch[3] || '';
+        const normCat = rawCat.toLowerCase().replace(/\s+/g, '_');
+
+        let badgeClass = 'bg-gray-800 text-gray-300 border-gray-700';
+        let icon = '⚡';
+
+        const criticalList = ['api_keys', 'passwords', 'database', 'private_keys', 'tokens', 'sqli_error', 'xss_reflected', 'path_traversal', 'ssti', 'financial'];
+        const highList = ['cors_misconfiguration', 'tls_issues', 'graphql_introspection'];
+        const medList = ['security_headers', 'cookie_security', 'open_port', 'http_methods', 'ssrf_candidate', 'mixed_content', 'sri_missing', 'open_redirect'];
+        const infoList = ['subdomain_found', 'tech_fingerprint', 'waf_detected', 'security_txt_missing'];
+
+        if (criticalList.includes(normCat) || rawCat === 'CRITICAL') {
+          badgeClass = 'bg-red-950/90 text-red-300 border-red-700/80 shadow-sm';
+          icon = '🚨';
+        } else if (highList.includes(normCat) || rawCat === 'HIGH') {
+          badgeClass = 'bg-orange-950/90 text-orange-300 border-orange-700/80 shadow-sm';
+          icon = '⚠️';
+        } else if (medList.includes(normCat) || rawCat === 'MEDIUM') {
+          badgeClass = 'bg-amber-950/90 text-amber-300 border-amber-700/80';
+          icon = '⚡';
+        } else if (infoList.includes(normCat) || rawCat === 'LOW' || rawCat === 'INFO') {
+          badgeClass = 'bg-cyan-950/90 text-cyan-300 border-cyan-800/80';
+          icon = 'ℹ️';
+        }
+
+        const confHtml = conf ? `<span class="text-[11px] font-mono text-gray-400 bg-gray-900 border border-gray-800 px-1.5 py-0.2 rounded mr-1.5 select-none">(${escapeHtml(conf)})</span>` : '';
+        const urlHtml = url ? `<span class="text-emerald-400 font-semibold break-all hover:underline select-all">${escapeHtml(url)}</span>` : '';
+
+        div.innerHTML = `
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold border uppercase tracking-wider ${badgeClass}">
+              <span class="mr-1">${icon}</span> ${escapeHtml(rawCat)}
+            </span>
+            ${confHtml}
+            ${urlHtml}
+          </div>`;
+        return div;
+      }
+
+      // Subfields: Data:, Line:, Type:
+      const subfieldMatch = line.match(/^\s*(Data|Line|Type):\s*(.*)$/);
+      if (subfieldMatch) {
+        const key = subfieldMatch[1];
+        const val = subfieldMatch[2];
+        div.innerHTML = `
+          <div class="pl-6 flex items-start space-x-2 text-xs">
+            <span class="text-teal-400 font-semibold select-none">↳ ${key}:</span>
+            <span class="text-amber-200 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40 font-mono break-all select-all font-medium">${escapeHtml(val)}</span>
+          </div>`;
+        return div;
+      }
+
+      // Status markers: [*], [+], [!], [-]
+      if (trimmed.startsWith('[*]')) {
+        div.innerHTML = `
+          <div class="flex items-start space-x-2">
+            <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10.5px] font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800 select-none">INFO</span>
+            <span class="text-slate-200 font-medium">${escapeHtml(trimmed.slice(3).trim())}</span>
+          </div>`;
+        return div;
+      }
+      if (trimmed.startsWith('[+]')) {
+        div.innerHTML = `
+          <div class="flex items-start space-x-2">
+            <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10.5px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800 select-none">OK</span>
+            <span class="text-emerald-300 font-medium">${escapeHtml(trimmed.slice(3).trim())}</span>
+          </div>`;
+        return div;
+      }
+      if (trimmed.startsWith('[!]')) {
+        div.innerHTML = `
+          <div class="flex items-start space-x-2">
+            <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10.5px] font-bold bg-amber-950/80 text-amber-300 border border-amber-800 select-none">WARN</span>
+            <span class="text-amber-200 font-medium">${escapeHtml(trimmed.slice(3).trim())}</span>
+          </div>`;
+        return div;
+      }
+      if (trimmed.startsWith('[-]')) {
+        div.innerHTML = `
+          <div class="flex items-start space-x-2">
+            <span class="inline-flex items-center px-1.5 py-0.2 rounded text-[10.5px] font-bold bg-rose-950/80 text-rose-300 border border-rose-800 select-none">FAIL</span>
+            <span class="text-rose-300 font-medium">${escapeHtml(trimmed.slice(3).trim())}</span>
+          </div>`;
+        return div;
+      }
+
+      // Overall Risk line
+      if (trimmed.includes('RISK') && (trimmed.includes('CRITICAL') || trimmed.includes('HIGH') || trimmed.includes('MEDIUM') || trimmed.includes('LOW'))) {
+        const isCrit = trimmed.includes('CRITICAL');
+        const isHigh = trimmed.includes('HIGH');
+        const isMed = trimmed.includes('MEDIUM');
+        const borderCls = isCrit ? 'border-red-700 bg-red-950/80 text-red-300' :
+                          isHigh ? 'border-orange-700 bg-orange-950/80 text-orange-300' :
+                          isMed ? 'border-amber-700 bg-amber-950/80 text-amber-300' :
+                          'border-emerald-700 bg-emerald-950/80 text-emerald-300';
+        div.innerHTML = `<span class="inline-block px-3 py-1 rounded-md border font-extrabold tracking-wide ${borderCls} my-1 shadow-sm">${escapeHtml(trimmed)}</span>`;
+        return div;
+      }
+
+      // Key-value headers
+      if (/^[A-Za-z ]+:\s*.+$/.test(trimmed) && !trimmed.startsWith('http')) {
+        const parts = trimmed.split(/:\s*(.*)/);
+        div.innerHTML = `
+          <div class="flex items-baseline space-x-2">
+            <span class="text-gray-400 font-medium min-w-[120px]">${escapeHtml(parts[0])}:</span>
+            <span class="text-white font-semibold">${escapeHtml(parts[1] || '')}</span>
+          </div>`;
+        return div;
+      }
+
+      // Default plain text line
+      div.innerText = line;
+      return div;
     }
 
     function appendLog(line) {
-      const terminal = document.getElementById('terminalBody');
-      const div = document.createElement('div');
-      
-      // Basic color parsing for ANSI or common keywords
-      if (line.includes('[CRITICAL]') || line.includes('Error') || line.includes('[-]')) {
-        div.className = 'text-red-400 font-semibold';
-      } else if (line.includes('[+]') || line.includes('PASS') || line.includes('completed')) {
-        div.className = 'text-emerald-400';
-      } else if (line.includes('[!]') || line.includes('WARN') || line.includes('[MEDIUM]')) {
-        div.className = 'text-yellow-400';
-      } else if (line.includes('[*]')) {
-        div.className = 'text-cyan-400';
-      } else {
-        div.className = 'text-gray-300';
+      allLogLines.push(line);
+      updateLogCounter();
+
+      const query = document.getElementById('logSearchInput').value.toLowerCase().trim();
+      if (query && !line.toLowerCase().includes(query)) {
+        return;
       }
 
-      div.innerText = line;
-      terminal.appendChild(div);
+      const terminal = document.getElementById('terminalBody');
+      terminal.appendChild(formatLogLine(line));
 
       if (document.getElementById('autoscrollCheck').checked) {
         terminal.scrollTop = terminal.scrollHeight;

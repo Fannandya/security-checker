@@ -66,3 +66,20 @@ def test_scan_manager_lifecycle(tmp_path):
 
         logs = manager.get_logs(scan_id)
         assert isinstance(logs, list)
+
+
+def test_log_capture_stream_strips_ansi():
+    from osc.web.manager import _LogCaptureStream
+
+    captured = []
+    stream = _LogCaptureStream(captured)
+    stream.write("\x1b[32m[*] Starting OSC Scan...\x1b[0m\n")
+    stream.write("\x1b[31m[CRITICAL]\x1b[0m https://example.com/api\n")
+    stream.write("     \x1b[36mData:\x1b[0m secret123\n")
+
+    assert captured == [
+        "[*] Starting OSC Scan...",
+        "[CRITICAL] https://example.com/api",
+        "     Data: secret123",
+    ]
+
