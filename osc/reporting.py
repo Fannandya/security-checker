@@ -88,6 +88,12 @@ def _html_document(report):
         cls = 'low' if vstat == 'confirmed' else ('info' if vstat == 'informational' else 'medium')
         return f"<br/><span class='pill {cls}'>{esc(vstat)}</span>"
 
+    def verif_cmd_html(finding):
+        cmd = finding.get('verification_cmd', '')
+        if not cmd:
+            return ''
+        return f"<br/><small style='color:#7cc7ff;'>Verify: {esc(cmd)}</small>"
+
     # reproducibility/scope_and_limitations get their own dedicated sections
     # below (repro_rows/limit_rows) - skip them here so they don't also show
     # up as raw Python repr text in the generic Scan Information table.
@@ -111,8 +117,7 @@ def _html_document(report):
         f"{info_pill(f)}{verif_pill(f)}</td>"
         f"<td class='mono url'>{esc(f.get('url',''))}</td>"
         f"<td class='mono val'>{esc(f.get('value',''))}</td>"
-        f"<td class='mono ev'>{(esc(f.get('evidence','')) or '&mdash;')}"
-        f"{('<br/><small style=\"color:#7cc7ff;\">Verify: ' + esc(f.get('verification_cmd','')) + '</small>') if f.get('verification_cmd') else ''}</td>"
+        f"<td class='mono ev'>{(esc(f.get('evidence','')) or '&mdash;')}{verif_cmd_html(f)}</td>"
         f"<td class='mono ctx'>{esc(f.get('context',''))}</td>"
         f"<td class='mono rem'>{esc(f.get('remediation') or f.get('context','')) or '&mdash;'}</td>"
         "</tr>"
