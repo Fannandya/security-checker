@@ -1,0 +1,18 @@
+# Traefik Dynamic File Provider Configuration for OSC Web Scanner
+# Place this file in LXC 10080 at: /opt/ingress/dynamic/osc.yml
+# Traefik v3 will automatically detect and load this route.
+
+http:
+  routers:
+    osc-web-router:
+      rule: "Host(`osc.yowman.my.id`)"
+      entryPoints:
+        - web
+      service: osc-web-service
+
+  services:
+    osc-web-service:
+      loadBalancer:
+        servers:
+          - url: "http://192.168.0.150:8000"
+        passHostHeader: true

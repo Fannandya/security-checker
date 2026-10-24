@@ -165,3 +165,21 @@ def test_o_html_with_different_explicit_html_path_writes_both_not_dropped():
 
 def test_no_output_flags_returns_all_none():
     assert resolve_output_paths(None, None, None) == (None, None, None, None, None)
+
+
+def test_cli_web_mode(monkeypatch):
+    from unittest.mock import patch
+    from osc.cli import main
+
+    with patch('uvicorn.run') as mock_uvicorn:
+        # Test osc web
+        main(['web', '--port', '8888'])
+        assert mock_uvicorn.called
+        assert mock_uvicorn.call_args[1]['port'] == 8888
+
+    with patch('uvicorn.run') as mock_uvicorn:
+        # Test osc --web
+        main(['--web', '--host', '127.0.0.1'])
+        assert mock_uvicorn.called
+        assert mock_uvicorn.call_args[1]['host'] == '127.0.0.1'
+

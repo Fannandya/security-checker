@@ -1,0 +1,50 @@
+name: Deploy to LXC 100150
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-lxc100150
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+        continue-on-error: true
+
+      - name: Run Test Suite
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -e ".[dev,web]"
+          pytest -v
+
+      - name: Build & Deploy Container Locally
+        run: |
+          docker compose down --remove-orphans || true
+          docker compose up -d --build
+
+      - name: Health Check Verification
+        run: |
+          echo "[*] Waiting for OSC Web Scanner to be healthy on port 8000..."
+          for i in {1..20}; do
+            if curl -s -f http://127.0.0.1:8000/api/health | grep -q '"status":"ok"'; then
+              echo "[+] Health check PASSED! Service online."
+              exit 0
+            fi
+            echo "Waiting for service... ($i/20)"
+            sleep 2
+          done
+          echo "[-] Health check failed. Container logs:"
+          docker compose logs --tail=50
+          exit 1

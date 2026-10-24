@@ -1,0 +1,16 @@
+.git
+.github
+.gemini
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+venv/
+e/
+build/
+osc.egg-info/
+graphify-out/
+.coverage
+htmlcov/

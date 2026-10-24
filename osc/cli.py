@@ -51,6 +51,9 @@ def build_parser():
     parser.add_argument('--html', help='Write HTML report to FILE')
     parser.add_argument('--csv', help='Write CSV report to FILE')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output (errors + progress)')
+    parser.add_argument('--web', action='store_true', help='Start OSC Web Dashboard server')
+    parser.add_argument('--host', default='0.0.0.0', help='Host to bind web server (default: 0.0.0.0)')
+    parser.add_argument('--port', type=int, default=8000, help='Port to bind web server (default: 8000)')
     parser.add_argument('-h', '--help', action='store_true', help='Show help message')
     return parser
 
@@ -128,6 +131,18 @@ def parse_ports(raw):
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    is_web = getattr(args, 'web', False) or args.target == 'web'
+    if is_web and not args.help:
+        try:
+            import uvicorn
+            from osc.web.app import app
+            print(f"{Fore.GREEN}[*] Starting OSC Web Dashboard at http://{args.host}:{args.port}{Style.RESET_ALL}")
+            uvicorn.run(app, host=args.host, port=args.port)
+            return
+        except ImportError:
+            print(f"{Fore.RED}[!] Web dependencies not installed. Run: pip install 'osc[web]'{Style.RESET_ALL}")
+            sys.exit(1)
 
     if args.help or not args.target:
         EnhancedOSCScanner('http://example.com').print_help()
