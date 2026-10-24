@@ -264,3 +264,35 @@ def test_run_all_returns_empty_for_urls_without_query_params():
 
 def test_run_all_default_checks_is_all_categories():
     assert set(active_scan.ALL_CHECKS) == {'xss', 'sqli', 'traversal', 'ssti', 'ssrf'}
+
+
+@responses.activate
+def test_check_xss_ignores_json_and_plain_text_content_type():
+    def json_cb(request):
+        query = parse_qs(urlparse(request.url).query)
+        q = query.get('q', [''])[0]
+        return (200, {'Content-Type': 'application/json'}, f'{{"echo": "{q}"}}')
+
+    responses.add_callback(responses.GET, 'https://example.test/api/search', callback=json_cb)
+    session = requests.Session()
+    findings = active_scan.run_all(
+        session, ['https://example.test/api/search?q=hello'], timeout=5, verify=False,
+        checks=('xss',),
+    )
+    assert findings == []
+
+
+@responses.activate
+def test_check_traversal_ignores_signature_already_in_baseline():
+    responses.add(
+        responses.GET, 'https://example.test/doc',
+        body='Example /etc/passwd line: root:x:0:0:root:/root:/bin/bash',
+        status=200,
+    )
+    session = requests.Session()
+    findings = active_scan.run_all(
+        session, ['https://example.test/doc?file=readme.txt'], timeout=5, verify=False,
+        checks=('traversal',),
+    )
+    assert findings == []
+

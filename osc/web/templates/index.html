@@ -308,6 +308,48 @@
       </div>
     </div>
 
+    <!-- Verified Findings & Developer Remediation Table -->
+    <div id="findingsCard" class="bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-xl">
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-gray-800">
+        <div>
+          <h3 class="text-base font-semibold text-white flex items-center space-x-2">
+            <span>🔍</span>
+            <span>Verified Findings &amp; Developer Remediation</span>
+            <span id="findingsBadgeCount" class="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-800 text-gray-300 border border-gray-700 font-mono">0</span>
+          </h3>
+          <p class="text-xs text-gray-400 mt-0.5">Accountable vulnerability matrix with CWE, OWASP Top 10, captured evidence, CLI verification commands, and remediation guidance.</p>
+        </div>
+        <!-- Severity Filter Buttons -->
+        <div class="flex flex-wrap items-center gap-1.5 text-xs">
+          <button type="button" onclick="setSeverityFilter('ALL')" id="flt-ALL" class="px-2.5 py-1 rounded font-semibold bg-emerald-600 text-white border border-emerald-500 transition">ALL</button>
+          <button type="button" onclick="setSeverityFilter('CRITICAL')" id="flt-CRITICAL" class="px-2.5 py-1 rounded font-semibold bg-gray-800 text-red-400 border border-gray-700 hover:bg-gray-700 transition">CRITICAL</button>
+          <button type="button" onclick="setSeverityFilter('HIGH')" id="flt-HIGH" class="px-2.5 py-1 rounded font-semibold bg-gray-800 text-orange-400 border border-gray-700 hover:bg-gray-700 transition">HIGH</button>
+          <button type="button" onclick="setSeverityFilter('MEDIUM')" id="flt-MEDIUM" class="px-2.5 py-1 rounded font-semibold bg-gray-800 text-amber-400 border border-gray-700 hover:bg-gray-700 transition">MEDIUM</button>
+          <button type="button" onclick="setSeverityFilter('LOW')" id="flt-LOW" class="px-2.5 py-1 rounded font-semibold bg-gray-800 text-emerald-400 border border-gray-700 hover:bg-gray-700 transition">LOW</button>
+          <button type="button" onclick="setSeverityFilter('INFO')" id="flt-INFO" class="px-2.5 py-1 rounded font-semibold bg-gray-800 text-cyan-400 border border-gray-700 hover:bg-gray-700 transition">INFO</button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto mt-4">
+        <table class="w-full text-left text-xs text-gray-300">
+          <thead class="bg-gray-950/60 text-gray-400 uppercase font-medium border-b border-gray-800">
+            <tr>
+              <th class="px-3 py-3">Severity / Standard</th>
+              <th class="px-3 py-3">Verification</th>
+              <th class="px-3 py-3">Target &amp; Finding</th>
+              <th class="px-3 py-3">Evidence &amp; Reproduction</th>
+              <th class="px-3 py-3">Developer Remediation</th>
+            </tr>
+          </thead>
+          <tbody id="findingsTableBody" class="divide-y divide-gray-800/80">
+            <tr>
+              <td colspan="5" class="px-4 py-6 text-center text-gray-500">Run or select a scan to inspect verified findings, evidence, and remediation steps.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Scans History Table -->
     <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-xl">
       <div class="flex items-center justify-between pb-4 border-b border-gray-800">
@@ -790,6 +832,9 @@
       }, 1000);
     }
 
+    let currentFindings = [];
+    let currentSeverityFilter = 'ALL';
+
     function updateScanMetrics(status) {
       if (status.duration) {
         document.getElementById('scanDuration').innerText = `${status.duration}s`;
@@ -801,21 +846,29 @@
       document.getElementById('scanUrlsCount').innerText = status.urls_scanned || 0;
       document.getElementById('scanFindingsCount').innerText = status.findings_count || 0;
 
-      // Group counts
-      const counts = status.category_counts || {};
+      const sevCounts = status.severity_counts || (status.summary && status.summary.severity_counts) || {};
       let crit = 0, high = 0, med = 0, low = 0, info = 0;
 
-      for (const [cat, count] of Object.entries(counts)) {
-        if (['api_keys', 'passwords', 'database', 'private_keys', 'tokens', 'sqli_error', 'xss_reflected', 'path_traversal', 'ssti'].includes(cat)) {
-          crit += count;
-        } else if (['cors_misconfiguration', 'tls_issues', 'graphql_introspection'].includes(cat)) {
-          high += count;
-        } else if (['security_headers', 'cookie_security', 'open_port', 'http_methods', 'ssrf_candidate'].includes(cat)) {
-          med += count;
-        } else if (['subdomain_found', 'tech_fingerprint', 'waf_detected', 'security_txt_missing'].includes(cat)) {
-          info += count;
-        } else {
-          low += count;
+      if (Object.keys(sevCounts).length > 0) {
+        crit = sevCounts.CRITICAL || 0;
+        high = sevCounts.HIGH || 0;
+        med = sevCounts.MEDIUM || 0;
+        low = sevCounts.LOW || 0;
+        info = sevCounts.INFO || 0;
+      } else {
+        const counts = status.category_counts || {};
+        for (const [cat, count] of Object.entries(counts)) {
+          if (['api_keys', 'passwords', 'database', 'private_keys', 'tokens', 'financial', 'sqli_error', 'xss_reflected', 'path_traversal', 'ssti'].includes(cat)) {
+            crit += count;
+          } else if (['cors_misconfiguration', 'tls_issues', 'graphql_introspection'].includes(cat)) {
+            high += count;
+          } else if (['exposed_sensitive_file', 'config_files', 'internal_ips', 'directory_listing', 'security_headers', 'cookie_security', 'open_port', 'http_methods', 'open_redirect', 'mixed_content'].includes(cat)) {
+            med += count;
+          } else if (['subdomain_found', 'tech_fingerprint', 'waf_detected', 'security_txt_missing', 'ssrf_candidate'].includes(cat)) {
+            info += count;
+          } else {
+            low += count;
+          }
         }
       }
 
@@ -824,6 +877,124 @@
       document.getElementById('cntMedium').innerText = med;
       document.getElementById('cntLow').innerText = low;
       document.getElementById('cntInfo').innerText = info;
+
+      if (Array.isArray(status.findings)) {
+        currentFindings = status.findings;
+        renderFindingsTable();
+      }
+    }
+
+    function setSeverityFilter(sev) {
+      currentSeverityFilter = sev;
+      const filters = ['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+      filters.forEach(f => {
+        const btn = document.getElementById(`flt-${f}`);
+        if (!btn) return;
+        if (f === sev) {
+          btn.className = 'px-2.5 py-1 rounded font-semibold bg-emerald-600 text-white border border-emerald-500 transition';
+        } else {
+          const textColors = {
+            ALL: 'text-gray-300',
+            CRITICAL: 'text-red-400',
+            HIGH: 'text-orange-400',
+            MEDIUM: 'text-amber-400',
+            LOW: 'text-emerald-400',
+            INFO: 'text-cyan-400',
+          };
+          btn.className = `px-2.5 py-1 rounded font-semibold bg-gray-800 ${textColors[f]} border border-gray-700 hover:bg-gray-700 transition`;
+        }
+      });
+      renderFindingsTable();
+    }
+
+    async function copyVerifyCmd(btn, encodedCmd) {
+      try {
+        const cmd = decodeURIComponent(encodedCmd);
+        await navigator.clipboard.writeText(cmd);
+        const orig = btn.innerText;
+        btn.innerText = '✓ Copied';
+        setTimeout(() => { btn.innerText = orig; }, 1800);
+      } catch (e) {
+        console.error('Copy failed', e);
+      }
+    }
+
+    function renderFindingsTable() {
+      const tbody = document.getElementById('findingsTableBody');
+      const badgeCount = document.getElementById('findingsBadgeCount');
+      if (!tbody) return;
+
+      const filtered = currentSeverityFilter === 'ALL'
+        ? currentFindings
+        : currentFindings.filter(f => (f.severity || 'LOW').toUpperCase() === currentSeverityFilter);
+
+      if (badgeCount) {
+        badgeCount.innerText = `${filtered.length} / ${currentFindings.length}`;
+      }
+
+      if (!filtered || filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-gray-500">${currentFindings.length === 0 ? 'No findings recorded for this scan.' : `No findings with severity ${currentSeverityFilter}.`}</td></tr>`;
+        return;
+      }
+
+      const sevBadgeStyles = {
+        CRITICAL: 'bg-red-950/90 text-red-300 border-red-700',
+        HIGH: 'bg-orange-950/90 text-orange-300 border-orange-700',
+        MEDIUM: 'bg-amber-950/90 text-amber-300 border-amber-700',
+        LOW: 'bg-emerald-950/90 text-emerald-300 border-emerald-700',
+        INFO: 'bg-cyan-950/90 text-cyan-300 border-cyan-800',
+      };
+
+      const verifStyles = {
+        confirmed: 'bg-emerald-950/80 text-emerald-300 border-emerald-700',
+        potential: 'bg-amber-950/80 text-amber-300 border-amber-700',
+        informational: 'bg-cyan-950/80 text-cyan-300 border-cyan-800',
+      };
+
+      tbody.innerHTML = filtered.map(f => {
+        const sev = (f.severity || 'LOW').toUpperCase();
+        const sevCls = sevBadgeStyles[sev] || sevBadgeStyles.LOW;
+        const cwe = f.cwe_id || 'CWE-200';
+        const owaspShort = (f.owasp || 'A05:2021').split(' - ')[0];
+        const vstat = (f.verification_status || (f.informational ? 'informational' : 'potential')).toLowerCase();
+        const vCls = verifStyles[vstat] || verifStyles.potential;
+        const conf = (f.confidence || 'low').toUpperCase();
+        const ev = f.evidence || f.context || '—';
+        const rem = f.remediation || f.context || '—';
+        const vcmd = f.verification_cmd || '';
+        const encodedCmd = encodeURIComponent(vcmd);
+
+        return `
+          <tr class="hover:bg-gray-800/30 transition align-top">
+            <td class="px-3 py-3 space-y-1 whitespace-nowrap">
+              <div><span class="px-2 py-0.5 rounded text-[10.5px] font-bold border ${sevCls}">${escapeHtml(sev)}</span></div>
+              <div class="font-mono text-[11px] text-purple-300 font-semibold">${escapeHtml(cwe)}</div>
+              <div class="font-mono text-[10.5px] text-gray-400" title="${escapeHtml(f.owasp || '')}">${escapeHtml(owaspShort)}</div>
+            </td>
+            <td class="px-3 py-3 space-y-1 whitespace-nowrap">
+              <div><span class="px-2 py-0.5 rounded text-[10.5px] font-bold border uppercase ${vCls}">${escapeHtml(vstat)}</span></div>
+              <div class="text-[11px] text-gray-400 font-mono">Conf: <span class="text-gray-200">${escapeHtml(conf)}</span></div>
+              <div class="text-[11px] text-gray-400 font-mono">${escapeHtml(f.category || '')}</div>
+            </td>
+            <td class="px-3 py-3 max-w-xs space-y-1">
+              <div class="font-mono text-emerald-400 break-all text-[11.5px] font-medium">${escapeHtml(f.url || '')}</div>
+              <div class="font-mono text-amber-200 bg-amber-950/30 border border-amber-800/40 rounded px-2 py-1 break-all text-[11.5px]">${escapeHtml(f.value || '')}</div>
+            </td>
+            <td class="px-3 py-3 max-w-sm space-y-1.5">
+              <div class="font-mono text-slate-200 bg-gray-950/90 border border-gray-800 rounded px-2 py-1 break-all whitespace-pre-wrap text-[11px]">${escapeHtml(ev)}</div>
+              ${vcmd ? `
+                <div class="flex items-center justify-between gap-2 bg-gray-950 border border-gray-800 rounded px-2 py-1">
+                  <code class="text-[10.5px] text-cyan-300 font-mono truncate max-w-[210px]" title="${escapeHtml(vcmd)}">${escapeHtml(vcmd)}</code>
+                  <button type="button" onclick="copyVerifyCmd(this, '${encodedCmd}')" class="px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 text-[10px] font-mono shrink-0">Copy Cmd</button>
+                </div>
+              ` : ''}
+            </td>
+            <td class="px-3 py-3 max-w-sm text-slate-300 text-xs leading-relaxed">
+              ${escapeHtml(rem)}
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
 
     function finalizeScan(status) {

@@ -129,6 +129,7 @@ RISK_LEVELS = {
     # Recon (osc/recon.py)
     'subdomain_found': 'LOW',
     'open_port': 'MEDIUM',
+    'port_scan_unreliable': 'LOW',
     'waf_detected': 'LOW',
     # Active vulnerability probing (osc/active_scan.py)
     'xss_reflected': 'HIGH',
@@ -165,12 +166,49 @@ CWE_MAPPINGS = {
     'graphql_introspection': 'CWE-200',
     'subdomain_found': 'CWE-200',
     'open_port': 'CWE-319',
+    'port_scan_unreliable': 'CWE-200',
     'waf_detected': 'CWE-200',
     'xss_reflected': 'CWE-79',
     'sqli_error': 'CWE-89',
     'path_traversal': 'CWE-22',
     'ssti': 'CWE-1336',
     'ssrf_candidate': 'CWE-918',
+}
+
+# OWASP Top 10 (2021) mapping per category for developer security compliance
+OWASP_MAPPINGS = {
+    'api_keys': 'A02:2021 - Cryptographic Failures / A07:2021 - Identification and Authentication Failures',
+    'passwords': 'A07:2021 - Identification and Authentication Failures',
+    'database': 'A02:2021 - Cryptographic Failures / A05:2021 - Security Misconfiguration',
+    'financial': 'A02:2021 - Cryptographic Failures',
+    'tokens': 'A07:2021 - Identification and Authentication Failures',
+    'private_keys': 'A02:2021 - Cryptographic Failures',
+    'exposed_sensitive_file': 'A05:2021 - Security Misconfiguration',
+    'config_files': 'A05:2021 - Security Misconfiguration',
+    'internal_ips': 'A01:2021 - Broken Access Control / Information Disclosure',
+    'sensitive_file_reference': 'A05:2021 - Security Misconfiguration',
+    'emails': 'A01:2021 - Broken Access Control / Information Disclosure',
+    'tls_issues': 'A02:2021 - Cryptographic Failures',
+    'cors_misconfiguration': 'A01:2021 - Broken Access Control / A05:2021 - Security Misconfiguration',
+    'directory_listing': 'A05:2021 - Security Misconfiguration',
+    'security_headers': 'A05:2021 - Security Misconfiguration',
+    'cookie_security': 'A05:2021 - Security Misconfiguration / A07:2021 - Identification and Authentication Failures',
+    'http_methods': 'A05:2021 - Security Misconfiguration',
+    'open_redirect': 'A01:2021 - Broken Access Control',
+    'tech_fingerprint': 'A05:2021 - Security Misconfiguration',
+    'mixed_content': 'A02:2021 - Cryptographic Failures',
+    'sri_missing': 'A08:2021 - Software and Data Integrity Failures',
+    'security_txt_missing': 'A05:2021 - Security Misconfiguration',
+    'graphql_introspection': 'A05:2021 - Security Misconfiguration',
+    'subdomain_found': 'A05:2021 - Security Misconfiguration / Attack Surface',
+    'open_port': 'A05:2021 - Security Misconfiguration',
+    'port_scan_unreliable': 'A05:2021 - Security Misconfiguration / Network Filtering',
+    'waf_detected': 'A05:2021 - Security Misconfiguration / Defense in Depth',
+    'xss_reflected': 'A03:2021 - Injection (Cross-Site Scripting)',
+    'sqli_error': 'A03:2021 - Injection (SQL Injection)',
+    'path_traversal': 'A01:2021 - Broken Access Control (Path Traversal)',
+    'ssti': 'A03:2021 - Injection (Server-Side Template Injection)',
+    'ssrf_candidate': 'A10:2021 - Server-Side Request Forgery (SSRF)',
 }
 
 # Remediation advice for the scanner's own secret/sensitive-file categories
@@ -215,5 +253,7 @@ REMEDIATION_ADVICE = {
     'open_redirect': 'Validate redirect targets against an allowlist of in-scope hosts/paths '
                       'instead of trusting a query-string parameter directly; if external '
                       'redirects are required, show an interstitial warning page first.',
+    'port_scan_unreliable': 'Re-run the port scan from inside the target network or without '
+                             'proxy/NAT interception to verify which TCP ports are genuinely open.',
 }
 

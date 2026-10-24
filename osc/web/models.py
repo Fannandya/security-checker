@@ -4,7 +4,7 @@
 
 """Pydantic models for OSC Web."""
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 
 
@@ -38,6 +38,8 @@ class ScanStatus(BaseModel):
     findings_count: int = 0
     risk_assessment: Optional[str] = None
     category_counts: Dict[str, int] = Field(default_factory=dict)
+    severity_counts: Dict[str, int] = Field(default_factory=dict)
+    findings: List[Dict[str, Any]] = Field(default_factory=list)
     error_message: Optional[str] = None
     artifacts: Dict[str, str] = Field(default_factory=dict)
     summary: Optional[Dict[str, Any]] = None

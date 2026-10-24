@@ -409,3 +409,48 @@ def test_scope_limitations_passive_disclaimer_absent_when_active_probing_ran():
     s = EnhancedOSCScanner('https://example.test', max_threads=2, timeout=1, depth=0,
                             skip_audit=True, recon=True, active=True)
     assert not any('passive/config observations' in lim for lim in s._scope_limitations())
+
+
+def test_is_valid_finding_rejects_js_expressions_and_schema_keywords(scanner):
+    assert not scanner.is_valid_finding('passwords', 'this.state.password', 'https://x.test/app.js')
+    assert not scanner.is_valid_finding('passwords', 'e.target.value', 'https://x.test/app.js')
+    assert not scanner.is_valid_finding('passwords', 'required', 'https://x.test/app.js')
+    assert not scanner.is_valid_finding('passwords', '********', 'https://x.test/app.js')
+    assert not scanner.is_valid_finding('api_keys', 'process.env.API_KEY', 'https://x.test/app.js')
+    assert not scanner.is_valid_finding('api_keys', 'config.apiKey', 'https://x.test/app.js')
+    assert not scanner.is_valid_finding('tokens', "localStorage.getItem('token')", 'https://x.test/app.js')
+    assert scanner.is_valid_finding('passwords', 'S3cretP@ssw0rd!2026', 'https://x.test/app.js')
+
+
+def test_internal_ips_rejects_invalid_octets_and_dotted_oids(scanner):
+    assert not scanner.is_valid_finding('internal_ips', '10.999.1.1', 'https://x.test')
+    assert not scanner.is_valid_finding('internal_ips', '192.168.1.300', 'https://x.test')
+    assert scanner.is_valid_finding('internal_ips', '10.0.1.25', 'https://x.test')
+
+    # OIDs / version strings containing 10.x or 172.16.x should not trigger internal_ips
+    scanner.analyze_content(
+        'https://x.test/snmp.txt',
+        'OID=1.3.6.1.4.1.172.16.0.1\nreal_ip=10.20.30.40\n',
+        'text/plain',
+    )
+    ip_findings = [f for f in scanner.found_sensitive_data if f['category'] == 'internal_ips']
+    assert len(ip_findings) == 1
+    assert ip_findings[0]['value'] == '10.20.30.40'
+    assert ip_findings[0]['evidence'].startswith('Line 2:')
+
+
+def test_analyze_content_populates_line_numbered_evidence_and_accountability_metadata(scanner):
+    body = "line1\nconst aws = 'AKIAIOSFODNN7EXAMPLE';\nline3"
+    scanner.analyze_content('https://x.test/bundle.js', body, 'application/javascript')
+    assert len(scanner.found_sensitive_data) >= 1
+    finding = next(f for f in scanner.found_sensitive_data if f['category'] == 'api_keys')
+    assert finding['evidence'].startswith('Line 2:')
+    assert finding['cwe_id'] == 'CWE-798'
+    assert 'A02:2021' in finding['owasp']
+    assert finding['severity'] == 'CRITICAL'
+    assert finding['verification_status'] == 'confirmed'
+    assert "curl -isk 'https://x.test/bundle.js'" in finding['verification_cmd']
+
+    report = scanner.generate_report()
+    assert report['summary']['severity_counts']['CRITICAL'] >= 1
+

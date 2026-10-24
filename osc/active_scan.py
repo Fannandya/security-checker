@@ -40,14 +40,14 @@ _REMEDIATION = {
 
 
 def _finding(url, category, value, confidence, context='', evidence='',
-             status_code=None, informational=False):
+             status_code=None, informational=False, content_type=''):
     return {
         'url': url,
         'category': category,
         'value': value,
         'confidence': confidence,
         'pattern': 'active_scan',
-        'content_type': '',
+        'content_type': content_type,
         'status_code': status_code,
         'evidence': evidence,
         'informational': informational,
@@ -78,6 +78,17 @@ def _build_url(parts, pairs, target_index, payload):
 # ---------------------------------------------------------------------- #
 # Reflected XSS
 # ---------------------------------------------------------------------- #
+_XSS_NON_HTML_CT = (
+    'application/json', 'application/ld+json', 'application/problem+json',
+    'application/javascript', 'text/javascript', 'text/css', 'text/csv',
+    'application/octet-stream', 'application/pdf',
+)
+_HTML_TAG_RE = re.compile(
+    r'<\s*(?:!doctype|html|head|body|div|span|p|a|form|input|script|table|ul|ol|li|h[1-6])\b',
+    re.I,
+)
+
+
 def _check_xss(session, parts, pairs, index, timeout, verify):
     marker = 'oscXSS' + ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
     payload = f'"><{marker}>'
@@ -86,15 +97,27 @@ def _check_xss(session, parts, pairs, index, timeout, verify):
         resp = session.get(test_url, timeout=timeout, verify=verify)
     except Exception:
         return None
-    if payload in resp.text:
-        key = pairs[index][0]
-        return _finding(
-            test_url, 'xss_reflected',
-            f"Reflected XSS: parameter '{key}' echoes an unescaped HTML payload",
-            'high', f"Injected: {payload}",
-            evidence=f"Injected: {payload}", status_code=resp.status_code,
-        )
-    return None
+    if payload not in resp.text:
+        return None
+    ct = (resp.headers.get('content-type') or '').lower()
+    if any(t in ct for t in _XSS_NON_HTML_CT):
+        return None
+    if 'text/plain' in ct:
+        body_without_payload = resp.text.replace(payload, '')
+        if not _HTML_TAG_RE.search(body_without_payload):
+            return None
+    key = pairs[index][0]
+    pos = resp.text.find(payload)
+    start = max(0, pos - 40)
+    end = min(len(resp.text), pos + len(payload) + 40)
+    snippet = resp.text[start:end].strip()
+    return _finding(
+        test_url, 'xss_reflected',
+        f"Reflected XSS: parameter '{key}' echoes an unescaped HTML payload",
+        'high', f"Injected: {payload}",
+        evidence=f"Injected: {payload}\nReflected in response: {snippet}",
+        status_code=resp.status_code, content_type=ct,
+    )
 
 
 # ---------------------------------------------------------------------- #
@@ -144,6 +167,7 @@ def _check_sqli(session, parts, pairs, index, timeout, verify, baseline_text):
             'high', "Injected payload appended: '",
             evidence=f"Injected payload: {payload!r}\nMatched DB error signature: {matched!r}",
             status_code=resp.status_code,
+            content_type=(resp.headers.get('content-type') or '').lower(),
         )
     return None
 
@@ -156,7 +180,7 @@ _TRAVERSAL_PAYLOAD = '../' * 6 + 'etc/passwd'
 _PASSWD_SIGNATURE = re.compile(r'root:.*:0:0:')
 
 
-def _check_traversal(session, parts, pairs, index, timeout, verify):
+def _check_traversal(session, parts, pairs, index, timeout, verify, baseline_text=''):
     key, _original = pairs[index]
     if not _TRAVERSAL_PARAM_HINTS.search(key):
         return None
@@ -165,12 +189,15 @@ def _check_traversal(session, parts, pairs, index, timeout, verify):
         resp = session.get(test_url, timeout=timeout, verify=verify)
     except Exception:
         return None
-    if _PASSWD_SIGNATURE.search(resp.text):
+    match = _PASSWD_SIGNATURE.search(resp.text)
+    if match and not _PASSWD_SIGNATURE.search(baseline_text or ''):
         return _finding(
             test_url, 'path_traversal',
             f"Path traversal / LFI: parameter '{key}' returns /etc/passwd contents",
             'high', f"Injected: {_TRAVERSAL_PAYLOAD}",
-            evidence=f"Injected: {_TRAVERSAL_PAYLOAD}", status_code=resp.status_code,
+            evidence=f"Injected: {_TRAVERSAL_PAYLOAD}\nMatched signature: {match.group(0)}",
+            status_code=resp.status_code,
+            content_type=(resp.headers.get('content-type') or '').lower(),
         )
     return None
 
@@ -223,6 +250,7 @@ def _check_ssti(session, parts, pairs, index, timeout, verify, baseline_text='')
                 f"'{payload}' to {product}",
                 'high', f"Injected: {payload}",
                 evidence=f"Injected: {payload}\nEvaluated to: {product}", status_code=resp.status_code,
+                content_type=(resp.headers.get('content-type') or '').lower(),
             )
     return None
 
@@ -263,7 +291,7 @@ def run_all(session, urls, timeout, verify, checks=None, max_threads=10):
 
     for url, parts, pairs in _urls_with_params(urls):
         baseline_text = ''
-        if 'sqli' in checks or 'ssti' in checks:
+        if 'sqli' in checks or 'ssti' in checks or 'traversal' in checks:
             try:
                 baseline_text = session.get(url, timeout=timeout, verify=verify).text
             except Exception:
@@ -283,7 +311,7 @@ def run_all(session, urls, timeout, verify, checks=None, max_threads=10):
             if result:
                 results.append(result)
         if 'traversal' in checks:
-            result = _check_traversal(session, parts, pairs, index, timeout, verify)
+            result = _check_traversal(session, parts, pairs, index, timeout, verify, baseline_text)
             if result:
                 results.append(result)
         if 'ssti' in checks:

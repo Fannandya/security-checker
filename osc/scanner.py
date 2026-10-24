@@ -29,7 +29,8 @@ from requests.adapters import HTTPAdapter
 from colorama import Fore, Style, init
 
 from osc.patterns import (
-    PATTERNS, SENSITIVE_FILES, KNOWN_SECRET_PREFIXES, RISK_LEVELS, REMEDIATION_ADVICE, CWE_MAPPINGS,
+    PATTERNS, SENSITIVE_FILES, KNOWN_SECRET_PREFIXES, RISK_LEVELS,
+    REMEDIATION_ADVICE, CWE_MAPPINGS, OWASP_MAPPINGS,
 )
 from osc import security_audit
 from osc import recon
@@ -468,21 +469,26 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
             if not value:
                 continue
             if final_host and (final_host in value.lower() or value.rstrip('/') in response.url):
+                chain = ' -> '.join([r.url for r in response.history] + [response.url])
                 self._add_finding({
                     'url': url,
                     'category': 'open_redirect',
                     'value': f"Parameter '{key}' steers redirect to external host: {final_host}",
                     'confidence': 'medium',
                     'pattern': 'redirect_chain',
+                    'status_code': response.history[0].status_code if response.history else response.status_code,
                     'content_type': '',
                     'context': f"{url} -> {response.url}",
+                    'evidence': f"Redirect chain: {chain}",
                 })
                 return
 
     def _check_directory_listing(self, url, content_type, scan_text):
         if 'text/html' not in content_type:
             return
-        if self._DIR_LISTING_TITLE_RE.search(scan_text) and self._DIR_LISTING_MARKER_RE.search(scan_text):
+        title_m = self._DIR_LISTING_TITLE_RE.search(scan_text)
+        marker_m = self._DIR_LISTING_MARKER_RE.search(scan_text)
+        if title_m and marker_m:
             self._add_finding({
                 'url': url,
                 'category': 'directory_listing',
@@ -490,7 +496,8 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 'confidence': 'high',
                 'pattern': 'directory_listing',
                 'content_type': content_type,
-                'context': '',
+                'context': title_m.group(0).strip(),
+                'evidence': f"Matched title: {title_m.group(0).strip()!r} and marker: {marker_m.group(0).strip()!r}",
             })
 
     def analyze_content(self, url, content, content_type):
@@ -508,16 +515,26 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
             for regex, value_group, confidence in compiled:
                 try:
                     for match in regex.finditer(scan_text):
+                        if category == 'internal_ips':
+                            start_idx, end_idx = match.start(), match.end()
+                            prev_ch = scan_text[start_idx - 1] if start_idx > 0 else ''
+                            next_ch = scan_text[end_idx] if end_idx < len(scan_text) else ''
+                            if prev_ch in '.0123456789' or next_ch in '.0123456789':
+                                continue
                         value = match.group(value_group) if value_group else match.group(0)
                         if value and self.is_valid_finding(category, value, url):
+                            line_no = scan_text.count('\n', 0, match.start()) + 1
+                            ctx = self._context(scan_text, match)
+                            sanitized = self.sanitize_value(value)
                             findings.append({
                                 'url': url,
                                 'category': category,
-                                'value': self.sanitize_value(value),
+                                'value': sanitized,
                                 'confidence': confidence,
                                 'pattern': regex.pattern,
                                 'content_type': content_type,
-                                'context': self._context(scan_text, match),
+                                'context': ctx,
+                                'evidence': f"Line {line_no}: {ctx}" if ctx else f"Line {line_no}: {sanitized}",
                             })
                 except Exception:
                     continue
@@ -557,6 +574,8 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
         low = value.lower()
         return any(low.startswith(p) for p in KNOWN_SECRET_PREFIXES)
 
+    _DOTTED_IDENT_RE = re.compile(r'^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)+$')
+
     def is_valid_finding(self, category, value, url):
         """Validate if the finding is actually sensitive (reduce false positives)."""
         if value is None:
@@ -566,10 +585,14 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
             return False
         low = value.lower()
 
-        # Obvious placeholders / examples
+        # Obvious placeholders / examples / schema & UI attribute keywords
         exact_placeholders = {
             'password', 'passwd', 'pwd', 'secret', 'key', 'token', 'changeme',
             'none', 'null', 'undefined', 'true', 'false', 'test', 'example',
+            'required', 'optional', 'string', 'number', 'boolean', 'object',
+            'array', 'function', 'default', 'inherit', 'initial', 'unset',
+            'auto', 'hidden', 'text', 'email', 'submit', 'button', 'reset',
+            'disabled', 'readonly', 'checked', 'selected', 'empty', 'blank',
         }
         if low in exact_placeholders:
             return False
@@ -594,8 +617,38 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 return False
             return True
 
-        if category in ('internal_ips', 'private_keys', 'config_files', 'database'):
+        if category == 'internal_ips':
+            parts = value.split('.')
+            if len(parts) != 4:
+                return False
+            try:
+                if not all(0 <= int(p) <= 255 for p in parts):
+                    return False
+            except ValueError:
+                return False
             return True
+
+        if category in ('private_keys', 'config_files', 'database'):
+            return True
+
+        if category in ('passwords', 'api_keys', 'tokens', 'financial'):
+            if not self._has_known_secret_prefix(value):
+                # Reject JS/code expressions, function calls, and template/DOM references
+                if any(tok in value for tok in ('(', ')', '{', '}', '[', ']', ';', '=>', '||', '&&')):
+                    return False
+                if any(tok in low for tok in (
+                    'this.', 'window.', 'document.', 'process.env', 'import.meta',
+                    'localstorage', 'sessionstorage', '.value', '.target', '.state',
+                    '.props', '.config', '.env.', 'form.', 'input.', 'data.',
+                    'item.', 'user.', 'req.', 'res.', 'ctx.',
+                )):
+                    return False
+                if self._DOTTED_IDENT_RE.match(value):
+                    return False
+                if low.startswith(('http://', 'https://', '//', '/', './', '../')):
+                    return False
+                if set(value) <= {'*', '•', '.', '-'}:
+                    return False
 
         if category in ('api_keys', 'tokens', 'financial'):
             if self._has_known_secret_prefix(value):
@@ -629,6 +682,8 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 continue
             seen.add(file_path)
             if self.is_potential_sensitive_file(file_path):
+                line_no = content.count('\n', 0, match.start()) + 1
+                ctx = self._context(content, match)
                 findings.append({
                     'url': url,
                     'category': 'sensitive_file_reference',
@@ -636,7 +691,8 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                     'confidence': 'low',
                     'pattern': 'file_reference',
                     'content_type': 'file_reference',
-                    'context': '',
+                    'context': ctx,
+                    'evidence': f"Line {line_no}: {ctx}" if ctx else f"Line {line_no}: {file_path}",
                 })
         return findings
 
@@ -644,7 +700,7 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
         """Check if a referenced path looks like a genuinely sensitive file."""
         if not file_path or len(file_path) > 200:
             return False
-        if '�' in file_path or any(ord(c) < 32 for c in file_path):
+        if '\ufffd' in file_path or any(ord(c) < 32 for c in file_path):
             return False
 
         fl = file_path.lower()
@@ -732,6 +788,14 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
         if not self._looks_like_exposed_file(matched, response):
             return
 
+        preview_lines = [
+            line.strip() for line in (response.text or '')[:400].splitlines() if line.strip()
+        ]
+        preview = (
+            ' | '.join(preview_lines[:2])[:160]
+            if preview_lines
+            else f"HTTP {response.status_code} ({len(response.content)} bytes)"
+        )
         self._add_finding({
             'url': url,
             'category': 'exposed_sensitive_file',
@@ -740,11 +804,66 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
             'pattern': 'direct_access',
             'status_code': response.status_code,
             'content_type': response.headers.get('content-type', '').lower(),
-            'context': '',
+            'context': preview,
+            'evidence': f"HTTP {response.status_code} ({len(response.content)} bytes) | Preview: {preview}",
         })
+
+    def _compute_finding_severity(self, finding):
+        """Compute deterministic per-finding severity (CRITICAL/HIGH/MEDIUM/LOW/INFO)
+        accounting for informational flag, category risk level, and confidence."""
+        if finding.get('informational'):
+            return 'INFO'
+        category = finding.get('category', '')
+        cat_risk = self.get_risk_level(category)
+        conf = (finding.get('confidence') or 'low').lower()
+        critical_cats = {
+            'xss_reflected', 'sqli_error', 'path_traversal', 'ssti',
+            'private_keys', 'database', 'api_keys', 'financial',
+        }
+        if cat_risk == 'HIGH':
+            if conf == 'high' and category in critical_cats:
+                return 'CRITICAL'
+            if conf in ('high', 'medium'):
+                return 'HIGH'
+            return 'MEDIUM'
+        if cat_risk == 'MEDIUM':
+            return 'MEDIUM' if conf in ('high', 'medium') else 'LOW'
+        return 'LOW'
+
+    @staticmethod
+    def _compute_verification_status(finding):
+        """Classify whether the finding is confirmed, potential, or informational."""
+        if finding.get('informational'):
+            return 'informational'
+        conf = (finding.get('confidence') or 'low').lower()
+        if conf == 'high':
+            return 'confirmed'
+        return 'potential'
+
+    @staticmethod
+    def _build_verification_cmd(finding):
+        """Generate a safe, copy-pasteable CLI command for developers to reproduce
+        and verify the finding directly."""
+        url = str(finding.get('url') or '').replace("'", "'\\''")
+        category = finding.get('category', '')
+        if not url:
+            return ''
+        if category == 'cors_misconfiguration':
+            return f"curl -isk -H 'Origin: https://evil.osc-probe.invalid' '{url}'"
+        if category == 'http_methods':
+            return f"curl -isk -X OPTIONS '{url}'"
+        if category == 'graphql_introspection':
+            return (
+                f"curl -sk -X POST -H 'Content-Type: application/json' "
+                f"-d '{{\"query\":\"{{__schema{{types{{name}}}}}}\"}}' '{url}'"
+            )
+        if category in ('security_headers', 'cookie_security'):
+            return f"curl -isk -I '{url}'"
+        return f"curl -isk '{url}'"
 
     def _add_finding(self, finding):
         """Thread-safe, de-duplicated finding recorder + printer."""
+        category = finding.get('category', '')
         # Normalize fields so every finding is uniform across report formats.
         finding.setdefault('status_code', None)
         finding.setdefault('evidence', '')
@@ -752,13 +871,17 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
         # Only fills the gap for scanner.py's own secret/file findings, which
         # never set this key; security_audit.py/recon.py/active_scan.py already
         # attach their own remediation text, so setdefault leaves those alone.
-        finding.setdefault('remediation', REMEDIATION_ADVICE.get(finding.get('category'), ''))
+        finding.setdefault('remediation', REMEDIATION_ADVICE.get(category, ''))
         # Standardize the CWE identifier too: security_audit sets its own
         # per-check CWE upfront, but scanner/recon/active_scan findings don't,
         # so the JSON report would otherwise carry findings with no cwe_id even
         # though CSV/HTML render one via CWE_MAPPINGS lookup.
-        finding.setdefault('cwe_id', CWE_MAPPINGS.get(finding.get('category'), 'CWE-200'))
-        key = (finding.get('url'), finding.get('category'), str(finding.get('value'))[:200])
+        finding.setdefault('cwe_id', CWE_MAPPINGS.get(category, 'CWE-200'))
+        finding.setdefault('owasp', OWASP_MAPPINGS.get(category, 'A05:2021 - Security Misconfiguration'))
+        finding.setdefault('severity', self._compute_finding_severity(finding))
+        finding.setdefault('verification_status', self._compute_verification_status(finding))
+        finding.setdefault('verification_cmd', self._build_verification_cmd(finding))
+        key = (finding.get('url'), category, str(finding.get('value'))[:200])
         with self.lock:
             if key in self._finding_keys:
                 return False
@@ -1072,6 +1195,13 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
         findings_by_category = self._group_by_category()
         total = len(self.found_sensitive_data)
         informational_count = sum(1 for f in self.found_sensitive_data if f.get('informational'))
+        severity_counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0, 'INFO': 0}
+        for f in self.found_sensitive_data:
+            sev = f.get('severity') or self._compute_finding_severity(f)
+            if sev in severity_counts:
+                severity_counts[sev] += 1
+            else:
+                severity_counts['LOW'] += 1
 
         report = {
             'scan_info': {
@@ -1101,6 +1231,7 @@ no separate "basic" mode. Only -X (active payload probing) is opt-in.{Style.RESE
                 'total_findings': total,
                 'informational_findings': informational_count,
                 'actionable_findings': total - informational_count,
+                'severity_counts': severity_counts,
                 'category_counts': {c: len(f) for c, f in findings_by_category.items()},
                 'findings_by_category': findings_by_category,
                 'risk_assessment': self.assess_overall_risk(findings_by_category),

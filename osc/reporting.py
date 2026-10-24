@@ -11,7 +11,7 @@ import time
 
 from colorama import Fore, Style
 
-from osc.patterns import RISK_LEVELS, CWE_MAPPINGS
+from osc.patterns import RISK_LEVELS, CWE_MAPPINGS, OWASP_MAPPINGS
 
 _RISK_HEX = {'CRITICAL': '#7c0a0a', 'HIGH': '#e5484d', 'MEDIUM': '#f5a623',
              'LOW': '#30a46c', 'NONE': '#8b8b8b'}
@@ -76,6 +76,18 @@ def _html_document(report):
     def info_pill(finding):
         return " <span class='pill info'>info</span>" if finding.get('informational') else ''
 
+    def verif_pill(finding):
+        vstat = finding.get('verification_status')
+        if not vstat:
+            if finding.get('informational'):
+                vstat = 'informational'
+            elif (finding.get('confidence') or '').lower() == 'high':
+                vstat = 'confirmed'
+            else:
+                vstat = 'potential'
+        cls = 'low' if vstat == 'confirmed' else ('info' if vstat == 'informational' else 'medium')
+        return f"<br/><span class='pill {cls}'>{esc(vstat)}</span>"
+
     # reproducibility/scope_and_limitations get their own dedicated sections
     # below (repro_rows/limit_rows) - skip them here so they don't also show
     # up as raw Python repr text in the generic Scan Information table.
@@ -93,12 +105,14 @@ def _html_document(report):
     finding_rows = ''.join(
         "<tr>"
         f"<td><span class='pill cwe'>{esc(f.get('cwe_id') or CWE_MAPPINGS.get(f.get('category',''), 'CWE-200'))}</span><br/>"
-        f"<span class='pill {_risk_for(f.get('category','')).lower()}'>{esc(f.get('category',''))}</span></td>"
+        f"<span class='pill {_risk_for(f.get('category','')).lower()}'>{esc(f.get('category',''))}</span><br/>"
+        f"<small class='muted'>{esc((f.get('owasp') or OWASP_MAPPINGS.get(f.get('category',''), '')).split(' - ')[0])}</small></td>"
         f"<td>{esc(f.get('confidence',''))}"
-        f"{info_pill(f)}</td>"
+        f"{info_pill(f)}{verif_pill(f)}</td>"
         f"<td class='mono url'>{esc(f.get('url',''))}</td>"
         f"<td class='mono val'>{esc(f.get('value',''))}</td>"
-        f"<td class='mono ev'>{(esc(f.get('evidence','')) or '&mdash;')}</td>"
+        f"<td class='mono ev'>{(esc(f.get('evidence','')) or '&mdash;')}"
+        f"{('<br/><small style=\"color:#7cc7ff;\">Verify: ' + esc(f.get('verification_cmd','')) + '</small>') if f.get('verification_cmd') else ''}</td>"
         f"<td class='mono ctx'>{esc(f.get('context',''))}</td>"
         f"<td class='mono rem'>{esc(f.get('remediation') or f.get('context','')) or '&mdash;'}</td>"
         "</tr>"

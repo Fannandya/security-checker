@@ -156,6 +156,8 @@ class ScanManager:
                     sc.findings_count = summary.get('total_findings', len(scanner.found_sensitive_data))
                     sc.risk_assessment = summary.get('risk_assessment', 'NONE')
                     sc.category_counts = summary.get('category_counts', {})
+                    sc.severity_counts = summary.get('severity_counts', {})
+                    sc.findings = list(report.get('findings', []))
                     sc.artifacts = {
                         "json": json_path,
                         "html": html_path,
