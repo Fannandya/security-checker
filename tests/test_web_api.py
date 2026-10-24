@@ -3,11 +3,14 @@
 # Part of OSC (Open Source Code Scanner) - https://github.com/Fannandya/security-checker
 
 import pytest
-from fastapi.testclient import TestClient
 from unittest.mock import patch
 
-from osc.web.app import app
-from osc.web.models import ScanStatus
+pytest.importorskip("fastapi")
+pytest.importorskip("pydantic")
+
+from fastapi.testclient import TestClient  # noqa: E402
+from osc.web.app import app  # noqa: E402
+from osc.web.models import ScanStatus  # noqa: E402
 
 client = TestClient(app)
 

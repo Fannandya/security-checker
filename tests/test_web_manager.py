@@ -7,8 +7,10 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from osc.web.models import ScanRequest, ScanStatus
-from osc.web.manager import ScanManager
+pytest.importorskip("pydantic")
+
+from osc.web.models import ScanRequest, ScanStatus  # noqa: E402
+from osc.web.manager import ScanManager  # noqa: E402
 
 
 def test_scan_request_defaults():
