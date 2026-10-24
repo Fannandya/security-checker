@@ -547,20 +547,47 @@
       }
     }
 
+    async function copyToClipboard(text) {
+      if (!text) return false;
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (e) {
+          // fallback below
+        }
+      }
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.top = '-9999px';
+        textArea.style.left = '-9999px';
+        textArea.setAttribute('readonly', '');
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        return successful;
+      } catch (err) {
+        console.error('Fallback clipboard copy failed', err);
+        return false;
+      }
+    }
+
     async function copyLogs() {
       const btn = document.getElementById('copyText');
       const icon = document.getElementById('copyIcon');
       const rawText = allLogLines.map(l => l.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')).join('\n');
-      try {
-        await navigator.clipboard.writeText(rawText);
+      const ok = await copyToClipboard(rawText);
+      if (ok) {
         btn.innerText = 'Copied!';
         icon.innerText = '✓';
         setTimeout(() => {
           btn.innerText = 'Copy';
           icon.innerText = '📋';
         }, 2000);
-      } catch (err) {
-        console.error('Failed to copy', err);
       }
     }
 
@@ -907,15 +934,18 @@
       renderFindingsTable();
     }
 
-    async function copyVerifyCmd(btn, encodedCmd) {
-      try {
-        const cmd = decodeURIComponent(encodedCmd);
-        await navigator.clipboard.writeText(cmd);
+    async function copyVerifyCmd(btn) {
+      const cmd = btn.getAttribute('data-cmd') || '';
+      if (!cmd) return;
+      const ok = await copyToClipboard(cmd);
+      if (ok) {
         const orig = btn.innerText;
         btn.innerText = '✓ Copied';
-        setTimeout(() => { btn.innerText = orig; }, 1800);
-      } catch (e) {
-        console.error('Copy failed', e);
+        btn.classList.add('text-emerald-400', 'border-emerald-500');
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.classList.remove('text-emerald-400', 'border-emerald-500');
+        }, 1800);
       }
     }
 
@@ -962,7 +992,6 @@
         const ev = f.evidence || f.context || '—';
         const rem = f.remediation || f.context || '—';
         const vcmd = f.verification_cmd || '';
-        const encodedCmd = encodeURIComponent(vcmd);
 
         return `
           <tr class="hover:bg-gray-800/30 transition align-top">
@@ -985,7 +1014,7 @@
               ${vcmd ? `
                 <div class="flex items-center justify-between gap-2 bg-gray-950 border border-gray-800 rounded px-2 py-1">
                   <code class="text-[10.5px] text-cyan-300 font-mono truncate max-w-[210px]" title="${escapeHtml(vcmd)}">${escapeHtml(vcmd)}</code>
-                  <button type="button" onclick="copyVerifyCmd(this, '${encodedCmd}')" class="px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 text-[10px] font-mono shrink-0">Copy Cmd</button>
+                  <button type="button" onclick="copyVerifyCmd(this)" data-cmd="${escapeHtml(vcmd)}" class="px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 text-[10px] font-mono shrink-0 select-none transition">Copy Cmd</button>
                 </div>
               ` : ''}
             </td>
