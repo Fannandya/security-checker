@@ -9,7 +9,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./output:/app/output
+      - ${OSC_OUTPUT_PATH:-/opt/osc/output}:/app/output
     environment:
       - OSC_OUTPUT_DIR=/app/output
       - PYTHONUNBUFFERED=1

@@ -5,7 +5,7 @@
 http:
   routers:
     osc-web-router:
-      rule: "Host(`osc.yowman.my.id`)"
+      rule: "Host(`osc.mamay.my.id`)"
       entryPoints:
         - web
       service: osc-web-service
@@ -14,5 +14,5 @@ http:
     osc-web-service:
       loadBalancer:
         servers:
-          - url: "http://192.168.0.150:8000"
+          - url: "http://192.168.0.15:8000"
         passHostHeader: true

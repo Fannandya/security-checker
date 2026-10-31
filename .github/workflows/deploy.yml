@@ -1,4 +1,4 @@
-name: Deploy to LXC 100150
+name: Deploy to LXC 10015
 
 on:
   push:
@@ -7,32 +7,33 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-lxc100150
+  group: deploy-lxc10015
   cancel-in-progress: false
 
 jobs:
   test-and-deploy:
-    runs-on: self-hosted
+    runs-on: [self-hosted, lxc10015]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-        continue-on-error: true
-
       - name: Run Test Suite
         run: |
-          python3 -m pip install --upgrade pip
-          pip install -e ".[dev,web]"
-          pytest -v
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e ".[dev,web]"
+          .venv/bin/pytest -v
+
+      - name: Backup Current Running Image
+        run: |
+          if docker image inspect osc-web:latest >/dev/null 2>&1; then
+            echo "[*] Backing up current osc-web:latest to osc-web:backup..."
+            docker tag osc-web:latest osc-web:backup
+          fi
 
       - name: Build & Deploy Container Locally
         run: |
-          docker compose down --remove-orphans || true
-          docker compose up -d --build
+          docker compose up -d --build --remove-orphans
 
       - name: Health Check Verification
         run: |
@@ -45,6 +46,12 @@ jobs:
             echo "Waiting for service... ($i/20)"
             sleep 2
           done
-          echo "[-] Health check failed. Container logs:"
+          echo "[-] Health check failed! Initiating rollback..."
+          if docker image inspect osc-web:backup >/dev/null 2>&1; then
+            docker tag osc-web:backup osc-web:latest
+            docker compose up -d
+            echo "[+] Rolled back to osc-web:backup successfully."
+          fi
+          echo "[-] Container logs:"
           docker compose logs --tail=50
           exit 1
